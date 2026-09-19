@@ -39,7 +39,7 @@ ApplicationWindow {
     SystemTrayIcon {
         id: trayIcon
         visible: true
-        tooltip: "桌面快捷控制台"
+        tooltip: "快捷"
         // 需指定托盘显示的图标文件（支持本地绝对路径或 qrc:/ 资源路径）
         icon.source: Qt.resolvedUrl("../assets/Run.png")
 
@@ -212,10 +212,19 @@ ApplicationWindow {
                 onClicked: console.log("点击了快捷键卡片")
             }
 
+            ModuleManagerDialog {
+                id: managerDialog
+                // 若 C++ 中已通过 context->setContextProperty("moduleModel", &model) 注入，
+                // 此处会自动识别 targetModel，无需额外传参。
+            }
+
             ActionCard {
                 title: "远程智能"
                 iconColor: "#3B82F6"
-                onClicked: console.log("点击了远程智能卡片")
+                onClicked: {
+                    console.log("点击了远程智能卡片")
+                    managerDialog.open()
+                }
             }
 
             // 动态注册的软件列表卡片

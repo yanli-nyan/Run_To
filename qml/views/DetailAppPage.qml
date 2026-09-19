@@ -92,20 +92,53 @@ Page {
                     anchors.centerIn: parent
                     spacing: 16
 
+                    // 图标预览容器
                     Rectangle {
+                        id: iconContainer
                         width: 64
                         height: 64
                         radius: 14
-                        color: detailPage.getValidColor(colorInput.text, "#4F46E5")
+                        color: "#F9FAFB"
                         border.color: Qt.rgba(0, 0, 0, 0.08)
                         border.width: 1
+                        clip: true
 
-                        Label {
-                            anchors.centerIn: parent
-                            text: characterInput.text.trim() !== "" ? characterInput.text.toUpperCase() : "A"
-                            font.pixelSize: 26
-                            font.bold: true
-                            color: "#FFFFFF"
+                        // 1. 原生程序图标（通过 AppIconProvider 提取）
+                        Image {
+                            id: sysAppIcon
+                            anchors.fill: parent
+                            anchors.margins: 6
+                            source: pathInput.text.trim() !== ""
+                                    ? ("image://appicon/" + encodeURIComponent(pathInput.text.trim()))
+                                    : ""
+                            sourceSize: Qt.size(64, 64)
+                            fillMode: Image.PreserveAspectFit
+                            smooth: true
+                            asynchronous: true
+                            cache: false
+                            visible: status === Image.Ready
+                        }
+
+                        // 2. 兜底徽标（提取失败、无图标或路径为空时显示）
+                        Rectangle {
+                            anchors.fill: parent
+                            visible: sysAppIcon.status !== Image.Ready
+                            radius: parent.radius
+                            color: detailPage.getValidColor(colorInput.text, "#4F46E5")
+
+                            Label {
+                                anchors.centerIn: parent
+                                text: {
+                                    if (characterInput.text.trim() !== "") {
+                                        return characterInput.text.trim().toUpperCase()
+                                    }
+                                    const name = nameInput.text.trim()
+                                    return name.length > 0 ? name.charAt(0).toUpperCase() : "A"
+                                }
+                                font.pixelSize: 26
+                                font.bold: true
+                                color: "#FFFFFF"
+                            }
                         }
                     }
 
@@ -120,9 +153,9 @@ Page {
                             elide: Text.ElideRight
                         }
                         Label {
-                            text: "实时图标与配置预览"
+                            text: sysAppIcon.status === Image.Ready ? "已识别系统原生图标" : "未识别到图标，已启用备用徽标"
                             font.pixelSize: 12
-                            color: "#6B7280"
+                            color: sysAppIcon.status === Image.Ready ? "#10B981" : "#6B7280"
                         }
                     }
                 }
@@ -207,7 +240,7 @@ Page {
                         spacing: 6
 
                         Label {
-                            text: "代表字符 (1~2 个字符)"
+                            text: "备用代表字符 (1~2 个字符)"
                             font.pixelSize: 12
                             font.bold: true
                             color: "#4B5563"
@@ -217,7 +250,7 @@ Page {
                             id: characterInput
                             Layout.fillWidth: true
                             implicitHeight: 38
-                            placeholderText: "如：C、CH"
+                            placeholderText: "如：C、CH（无原生图标时生效）"
                             maximumLength: 2
                             font.pixelSize: 13
                             selectByMouse: true
@@ -236,7 +269,7 @@ Page {
                         spacing: 6
 
                         Label {
-                            text: "图标背景色"
+                            text: "备用图标背景色"
                             font.pixelSize: 12
                             font.bold: true
                             color: "#4B5563"

@@ -4,6 +4,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QSaveFile>
 
 ModuleModel::ModuleModel(QObject *parent) : QAbstractListModel(parent)
 {
@@ -83,10 +84,15 @@ void ModuleModel::loadDataFromSource()
     for (int i = 0; i < modulesArray.size(); ++i)
     {
         QJsonObject itemObj = modulesArray[i].toObject();
+
         QString name = itemObj.value("name").toString("未命名");
-        QString path = itemObj.value("path").toString("");
-        QString color = itemObj.value("color").toString("#FFFFFF");
-        QString character = itemObj.value("character").toString("-");
+        QString color = itemObj.value("color").toString("#3B82F6");
+
+        // 若无 "path" 键，返回空字符串 ""
+        QString path = itemObj.contains("path") ? itemObj.value("path").toString() : QString();
+
+        // 动态回退生成 character（取 name 首字母）
+        QString character = name.isEmpty() ? QStringLiteral("-") : name.left(1).toUpper();
 
         m_items.append({name, path, color, character});
     }
@@ -98,43 +104,81 @@ void ModuleModel::loadDataFromSource()
 // 统一保存内存中的 m_items 到 config.json
 bool ModuleModel::saveToFile()
 {
-    QString configPath = "config.json";
-    QFile file(configPath);
+    const QString configPath = "config.json";
     QJsonObject rootObj;
 
-    // 若原文件存在，读取保留可能存在的其他配置项（如 version）
-    if (file.open(QIODevice::ReadOnly | QIODevice::Text))
+    // 1. 若原文件已存在且有效，保留原有的外部字段（例如 version 或其他全局配置）
+    QFile readFile(configPath);
+    if (readFile.exists() && readFile.open(QIODevice::ReadOnly | QIODevice::Text))
     {
-        QJsonDocument doc = QJsonDocument::fromJson(file.readAll());
-        if (doc.isObject())
+        QJsonParseError parseError;
+        QJsonDocument doc = QJsonDocument::fromJson(readFile.readAll(), &parseError);
+        if (parseError.error == QJsonParseError::NoError && doc.isObject())
         {
             rootObj = doc.object();
         }
-        file.close();
+        readFile.close();
     }
 
+    // 2. 构建 modules 节点
     QJsonArray modulesArray;
     for (const auto &item : m_items)
     {
         QJsonObject obj;
-        obj["name"] = item.name;
-        obj["path"] = item.path;
-        obj["color"] = item.color;
-        obj["character"] = item.character;
+
+        // 【必填项 1】name：确保键存在，若为空字符串则做兜底处理
+        obj["name"] = item.name.trimmed().isEmpty() ? QStringLiteral("未命名") : item.name;
+
+        // 【必填项 2】color：确保键存在，非法或空时提供默认色
+        obj["color"] = item.color.trimmed().isEmpty() ? QStringLiteral("#3B82F6") : item.color;
+
+        // 【必填项 3】character：确保键存在，空值时回退到名称首字符或缺省符
+        if (!item.character.trimmed().isEmpty())
+        {
+            obj["character"] = item.character;
+        }
+        else if (!item.name.trimmed().isEmpty())
+        {
+            obj["character"] = item.name.trimmed().left(1).toUpper();
+        }
+        else
+        {
+            obj["character"] = QStringLiteral("-");
+        }
+
+        // 【可选项】path：仅在路径实际存在（非全空格、非空）时才序列化该键
+        QString trimmedPath = item.path.trimmed();
+        if (!trimmedPath.isEmpty())
+        {
+            obj["path"] = trimmedPath;
+        }
+
         modulesArray.append(obj);
     }
 
+    // 更新业务元数据
     rootObj["version"] = "1.1";
     rootObj["modules"] = modulesArray;
 
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+    // 3. 使用 QSaveFile 进行安全写入（写入临时文件并在 commit 时原子重命名）
+    QSaveFile saveFile(configPath);
+    if (!saveFile.open(QIODevice::WriteOnly | QIODevice::Text))
     {
-        qWarning() << "无法打开文件以写入:" << configPath;
+        qWarning() << "[ModuleModel] 无法创建或打开配置文件用于保存:" << configPath;
         return false;
     }
 
-    file.write(QJsonDocument(rootObj).toJson());
-    file.close();
+    // 使用 Indented 格式化缩进，方便人工查看与编辑
+    QByteArray outputData = QJsonDocument(rootObj).toJson(QJsonDocument::Indented);
+    qint64 bytesWritten = saveFile.write(outputData);
+
+    if (bytesWritten == -1 || !saveFile.commit())
+    {
+        qWarning() << "[ModuleModel] 文件写入提交失败，可能磁盘空间不足或权限异常";
+        saveFile.cancelWriting();
+        return false;
+    }
+
     return true;
 }
 

@@ -11,6 +11,10 @@
 #include <QIcon>
 #include <QPixmap>
 #include <QBuffer>
+#include <QPainter>
+#include <QFont>
+#include <QLinearGradient>
+#include <QColor>
 
 // 区分 Qt5 与 Qt6 的 QZipWriter 路径
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
@@ -23,6 +27,62 @@
 #include <windows.h>
 #include <shobjidl.h>
 #include <shlguid.h>
+
+// 根据名称/标识符和主题色，动态绘制 256x256 高清圆角 App 图标
+static QPixmap generateModernLetterIcon(const QString &text, const QString &colorHex, int targetSize = 256)
+{
+    // 创建带 Alpha 通道的离屏画布
+    QImage image(targetSize, targetSize, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+
+    QPainter painter(&image);
+    painter.setRenderHints(QPainter::Antialiasing | QPainter::TextAntialiasing | QPainter::SmoothPixmapTransform);
+
+    // 1. 颜色与微渐变处理（上下微调明度，呈现现代光影质感）
+    QColor baseColor(colorHex.trimmed().isEmpty() ? "#3B82F6" : colorHex.trimmed());
+    if (!baseColor.isValid())
+    {
+        baseColor = QColor("#3B82F6");
+    }
+
+    QLinearGradient gradient(0, 0, 0, targetSize);
+    gradient.setColorAt(0.0, baseColor.lighter(112));
+    gradient.setColorAt(1.0, baseColor.darker(108));
+
+    // 2. 绘制圆角矩形底板（圆角半径约为宽度的 22%，贴合现代 UI 图标规范）
+    qreal cornerRadius = targetSize * 0.22;
+    QRectF rect(0, 0, targetSize, targetSize);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(gradient);
+    painter.drawRoundedRect(rect, cornerRadius, cornerRadius);
+
+    // 3. 提取中心文字（优先 1 个主字；若是英文缩写最多支持 2 个字符）
+    QString displayText = text.trimmed();
+    if (displayText.isEmpty())
+    {
+        displayText = QStringLiteral("M");
+    }
+    else if (displayText.length() > 2)
+    {
+        displayText = displayText.left(1);
+    }
+
+    // 4. 字体设置与文字垂直居中排版
+    QFont font = painter.font();
+    font.setBold(true);
+    // 单字占比约 46%，双字占比约 32%
+    int pixelSize = (displayText.length() == 1) ? (targetSize * 0.46) : (targetSize * 0.32);
+    font.setPixelSize(pixelSize);
+    font.setFamily(QStringLiteral("Microsoft YaHei, PingFang SC, Segoe UI, sans-serif"));
+    painter.setFont(font);
+
+    // 白色微透文字
+    painter.setPen(QColor(255, 255, 255, 245));
+    painter.drawText(rect, Qt::AlignCenter, displayText);
+
+    painter.end();
+    return QPixmap::fromImage(image);
+}
 
 // 将 Windows 原生 HICON 转换为带 Alpha 通道的 32 位 QImage
 static QImage hIconToQImage(HICON hIcon)
@@ -211,7 +271,7 @@ bool ShareManager::exportSharePackage(const QString &outputZipPath)
     // 3. 将原始 config.json 写入 ZIP 根目录
     zip.addFile("config.json", configBytes);
 
-    // 4. 解析 modules 并提取各子项的图标
+    // 4. 解析 modules 并提取/生成各子项图标
     QJsonObject rootObj = doc.object();
     QJsonArray modules = rootObj.value("modules").toArray();
     QFileIconProvider iconProvider;
@@ -219,51 +279,56 @@ bool ShareManager::exportSharePackage(const QString &outputZipPath)
     for (const QJsonValue &item : modules)
     {
         QJsonObject mod = item.toObject();
+        QString name = mod.value("name").toString();
         QString character = mod.value("character").toString();
-        QString rawPath = mod.value("path").toString();
+        QString rawPath = mod.value("path").toString().trimmed();
+        QString colorHex = mod.value("color").toString("#3B82F6");
 
+        // 若 character 为空，则优先取 name 的首字符作为标识与文件名
         if (character.isEmpty())
         {
-            continue;
-        }
-
-        // 解析目标文件路径（兼容相对路径与绝对路径）
-        QString resolvedPath = rawPath;
-        QFileInfo fileInfo(resolvedPath);
-        if (fileInfo.isRelative())
-        {
-            resolvedPath = QDir(appDir).filePath(rawPath);
-            fileInfo.setFile(resolvedPath);
+            character = name.trimmed().isEmpty() ? QStringLiteral("M") : name.trimmed().left(1);
         }
 
         QPixmap pixmap;
 
-#ifdef Q_OS_WIN
-        // 优先使用原生 API 提取无箭头的 256x256 高清原图
-        if (fileInfo.exists())
+        // 仅在配置了有效路径且路径存在时尝试提取原生图标
+        if (!rawPath.isEmpty())
         {
-            pixmap = extractCleanAppPixmap(resolvedPath, 256);
-        }
-#endif
-
-        // 回退兜底：如果不是 Windows 或原生提取失败，再走 QFileIconProvider
-        if (pixmap.isNull() && fileInfo.exists())
-        {
-            QIcon icon = iconProvider.icon(fileInfo);
-            if (!icon.isNull())
+            QString resolvedPath = rawPath;
+            QFileInfo fileInfo(resolvedPath);
+            if (fileInfo.isRelative())
             {
-                pixmap = icon.pixmap(256, 256);
+                resolvedPath = QDir(appDir).filePath(rawPath);
+                fileInfo.setFile(resolvedPath);
+            }
+
+            if (fileInfo.exists())
+            {
+#ifdef Q_OS_WIN
+                // 优先使用 Windows API 提取无快捷方式角标的高清大图
+                pixmap = extractCleanAppPixmap(resolvedPath, 256);
+#endif
+                // 回退走系统图标库
+                if (pixmap.isNull())
+                {
+                    QIcon icon = iconProvider.icon(fileInfo);
+                    if (!icon.isNull())
+                    {
+                        pixmap = icon.pixmap(256, 256);
+                    }
+                }
             }
         }
 
-        // 最终兜底：使用颜色填充占位图
+        // 最终兜底：没有路径、提取失败或无原生图标时，根据 character / name 与主题色动态绘制
         if (pixmap.isNull())
         {
-            pixmap = QPixmap(256, 256);
-            pixmap.fill(QColor(mod.value("color").toString("#215694")));
+            QString letter = !character.trimmed().isEmpty() ? character : name;
+            pixmap = generateModernLetterIcon(letter, colorHex, 256);
         }
 
-        // 转成 PNG 数据流并写入 resources/<character>.png
+        // 转成 PNG 数据流并存入 resources/<character>.png
         QByteArray imgBytes;
         QBuffer buffer(&imgBytes);
         buffer.open(QIODevice::WriteOnly);

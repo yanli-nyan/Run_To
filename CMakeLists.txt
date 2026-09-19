@@ -29,6 +29,7 @@ qt_add_qml_module(appRun_To
         qml/components/ActionCard.qml
         qml/views/SelectAppPage.qml
         qml/views/DetailAppPage.qml
+        qml/views/ModuleManagerDialog.qml
 
     SOURCES
         src/models/ModuleModel.h    
@@ -63,6 +64,7 @@ target_link_libraries(appRun_To
         Qt6::Mqtt
         Qt6::Widgets
         Qt6::QuickControls2
+        Qt6::Gui
 )
 
 if(WIN32)
