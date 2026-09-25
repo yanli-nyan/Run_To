@@ -6,9 +6,11 @@
 #include <QJsonParseError>
 #include "ConfigLauncher.h"
 
+
 MqttHandler::MqttHandler(QObject *parent) : QObject(parent)
 {
     m_client = new QMqttClient(this);
+    m_dispatcher = new JsonCommandDispatcher(this);
 
     connect(m_client, &QMqttClient::connected, this, &MqttHandler::handleConnected);
     connect(m_client, &QMqttClient::disconnected, this, &MqttHandler::handleDisconnected);
@@ -41,6 +43,24 @@ MqttHandler::MqttHandler(QObject *parent) : QObject(parent)
         }
         qDebug() << "MQTT 发生错误，错误码:" << error << "=>" << desc;
         emit connectionError(desc); });
+
+    m_dispatcher->setDefaultHandler([](const QString &cmd)
+                                    { return ConfigLauncher::launchByCharacter(cmd); });
+
+    // 2. 注册特定字符/指令的独立分支逻辑示例
+    m_dispatcher->registerHandler("REBOOT", [](const QString &val)
+                                  {
+            qDebug() << "执行系统重启逻辑...";
+            return true; });
+
+    m_dispatcher->registerHandler("VOLUME_MUTE", [](const QString &val)
+                                  {
+            qDebug() << "执行静音操作...";
+            return true; });
+
+    // 3. 关联信号
+    connect(m_dispatcher, &JsonCommandDispatcher::commandExtracted,
+            this, &MqttHandler::messageReceived);
 
     // 实例构造时自动从本地读取已保存的配置
     loadSettings();
@@ -144,74 +164,7 @@ void MqttHandler::handleMessage(const QByteArray &message, const QMqttTopicName 
 
 void MqttHandler::processDeviceData(const QString &topicName, const QByteArray &payload)
 {
-    QJsonParseError jsonError;
-    QJsonDocument doc = QJsonDocument::fromJson(payload, &jsonError);
-
-    // 1. 校验 JSON 格式是否合法
-    if (jsonError.error != QJsonParseError::NoError)
-    {
-        qDebug() << "[JSON 错误] 解析失败:" << jsonError.errorString()
-                 << "| 原始数据:" << payload;
-        return;
-    }
-
-    // 2. 校验是否为 JSON 对象
-    if (!doc.isObject())
-    {
-        qDebug() << "[格式错误] 期望 JSON 对象，实际收到非对象格式";
-        return;
-    }
-
-    QJsonObject jsonObj = doc.object();
-
-    // 3. 校验是否包含目标字段 "value"
-    if (!jsonObj.contains("value"))
-    {
-        qDebug() << "[字段缺失] JSON 中不包含 'value' 字段 | 原始数据:" << payload;
-        return;
-    }
-
-    // 4. 提取 "value" 字段
-    QJsonValue valueField = jsonObj.value("value");
-    qDebug() << "---------- 接收到 MQTT 消息 ----------";
-    qDebug() << "来源主题:" << topicName;
-
-    QString valueStr;
-    if (valueField.isDouble())
-    {
-        valueStr = QString::number(valueField.toDouble());
-        qDebug() << "[提取成功] value (数字类型):" << valueStr;
-    }
-    else if (valueField.isString())
-    {
-        valueStr = valueField.toString();
-        qDebug() << "[提取成功] value (字符串类型):" << valueStr;
-    }
-    else if (valueField.isBool())
-    {
-        valueStr = valueField.toBool() ? "true" : "false";
-        qDebug() << "[提取成功] value (布尔类型):" << valueStr;
-    }
-    else
-    {
-        valueStr = QString::fromUtf8(payload);
-        qDebug() << "[提取成功] value (复杂结构，保留原始文本)";
-    }
-    qDebug() << "--------------------------------------";
-
-    // 抛出信号通知界面层
-    emit messageReceived(topicName, valueStr);
-
-    // 调用本地执行模块
-    bool ok = ConfigLauncher::launchByCharacter(valueStr);
-    if (ok)
-    {
-        qDebug() << "启动流程执行完毕";
-    }
-    else
-    {
-        qWarning() << "未能拉起对应程序，请检查日志输出";
-    }
+    m_dispatcher->processAndDispatch(topicName, payload);
 }
 
 void MqttHandler::tryAutoConnect()

@@ -205,17 +205,28 @@ ApplicationWindow {
             rightPadding: 20
             spacing: 16
 
+            ShortcutConfigDialog {
+                id: shortcutConfigDialog
+            }
+
             // 内置功能卡片
             ActionCard {
                 title: "快捷键"
                 iconColor: "#8B5CF6"
-                onClicked: console.log("点击了快捷键卡片")
+                onClicked: {
+                    console.log("点击了快捷键卡片")
+                    // 如果窗口已打开但被最小化或置于底层，自动激活并置顶到前台
+                    if (!shortcutConfigDialog.visible) {
+                        shortcutConfigDialog.show()
+                    } else {
+                        shortcutConfigDialog.raise()
+                        shortcutConfigDialog.requestActivate()
+                    }
+                }
             }
 
             ModuleManagerDialog {
                 id: managerDialog
-                // 若 C++ 中已通过 context->setContextProperty("moduleModel", &model) 注入，
-                // 此处会自动识别 targetModel，无需额外传参。
             }
 
             ActionCard {
@@ -223,7 +234,12 @@ ApplicationWindow {
                 iconColor: "#3B82F6"
                 onClicked: {
                     console.log("点击了远程智能卡片")
-                    managerDialog.open()
+                    if (!managerDialog.visible) {
+                        managerDialog.show()
+                    } else {
+                        managerDialog.raise()
+                        managerDialog.requestActivate()
+                    }
                 }
             }
 

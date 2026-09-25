@@ -5,6 +5,9 @@
 #include <QMqttClient>
 #include <QSettings>
 #include <QtQml/qqmlregistration.h>
+#include "JsonCommandDispatcher.h"
+
+class JsonCommandDispatcher;
 
 class MqttHandler : public QObject
 {
@@ -58,6 +61,7 @@ private:
     void processDeviceData(const QString &topicName, const QByteArray &payload);
 
     QMqttClient *m_client;
+    JsonCommandDispatcher *m_dispatcher;
 
     // 持久化字段缓存
     QString m_host;

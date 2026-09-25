@@ -16,8 +16,8 @@ qt_add_executable(appRun_To
     src/controllers/SoftwareScanner.cpp
     src/controllers/ShareManager.cpp
     src/controllers/AppLauncher.cpp
-    src/controllers/ConfigLauncher.h
     src/controllers/ConfigLauncher.cpp
+    src/controllers/JsonCommandDispatcher.cpp
 )
 
 qt_add_qml_module(appRun_To
@@ -30,6 +30,7 @@ qt_add_qml_module(appRun_To
         qml/views/SelectAppPage.qml
         qml/views/DetailAppPage.qml
         qml/views/ModuleManagerDialog.qml
+        qml/views/ShortcutConfigDialog.qml
 
     SOURCES
         src/models/ModuleModel.h    
@@ -38,6 +39,8 @@ qt_add_qml_module(appRun_To
         src/controllers/AppIconProvider.h
         src/controllers/ShareManager.h
         src/controllers/AppLauncher.h
+        src/controllers/ConfigLauncher.h
+        src/controllers/JsonCommandDispatcher.h
 
     RESOURCES
         assets/Run.png

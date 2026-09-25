@@ -4,16 +4,18 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
+import QtQuick.Window
 
-Dialog {
+Window {
     id: root
-    title: ""
-    width: 440
-    implicitHeight: contentLayout.implicitHeight + 40
-    modal: true
-    focus: true
-    anchors.centerIn: Overlay.overlay
-    closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+    title: "智能部分"
+    width: 620
+    height: 350
+    minimumWidth: 620
+    minimumHeight: 350
+    visible: false // 初始不显示，等待触发
+    modality: Qt.ApplicationModal
+    flags: Qt.Dialog
 
     // 默认绑定上下文中的 moduleModel，支持外部动态赋值
     property var targetModel: typeof moduleModel !== "undefined" ? moduleModel : null
@@ -40,22 +42,12 @@ Dialog {
         return (c.a > 0 || colorStr.toLowerCase() === "#000000" || colorStr.toLowerCase() === "black") ? colorStr : fallback
     }
 
-    onAboutToShow: clearInputs()
+    onVisibleChanged:clearInputs()
 
-    // 模态背景平滑遮罩
-    Overlay.modal: Rectangle {
-        color: Qt.rgba(0, 0, 0, 0.45)
-    }
-
-    background: Rectangle {
-        radius: 12
-        color: "#FFFFFF"
-        border.color: "#E5E7EB"
-        border.width: 1
-    }
-
-    contentItem: ColumnLayout {
+    ColumnLayout {
         id: contentLayout
+        anchors.fill: parent
+        anchors.margins: 20
         spacing: 16
 
         // --- 1. 顶部标题与关闭按钮 ---
@@ -69,28 +61,6 @@ Dialog {
                 font.bold: true
                 color: "#111827"
                 Layout.fillWidth: true
-            }
-
-            Rectangle {
-                width: 26
-                height: 26
-                radius: 13
-                color: closeMouse.containsMouse ? "#F3F4F6" : "transparent"
-
-                Text {
-                    anchors.centerIn: parent
-                    text: "✕"
-                    font.pixelSize: 12
-                    color: "#9CA3AF"
-                }
-
-                MouseArea {
-                    id: closeMouse
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.close()
-                }
             }
         }
 

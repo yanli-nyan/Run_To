@@ -8,7 +8,7 @@ import QtQuick.Layouts
 Window {
     id: root
     width: 440
-    height: 520
+    height: 550
     minimumWidth: 420
     minimumHeight: 480
     title: "设置"
