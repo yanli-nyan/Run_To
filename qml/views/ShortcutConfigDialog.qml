@@ -38,6 +38,13 @@ Window {
         }
     }
 
+    function loadSavedKeys() {
+        const saved = shortcutController.loadShortcuts()
+        keyModel.clear()
+        for (let i = 0; i < saved.length; ++i) keyModel.append(saved[i])
+    }
+    onVisibleChanged: if (visible) loadSavedKeys()
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -538,12 +545,12 @@ Window {
                             }
 
                             onClicked: {
-                                console.log("=== 快捷键配置已保存 ===")
+                                const values = []
                                 for (let i = 0; i < keyModel.count; ++i) {
                                     const item = keyModel.get(i)
-                                    console.log(`[Key ${item.keyId}] ${item.keyName} -> ${item.actionType}: ${item.param}`)
+                                    values.push({keyId:item.keyId, keyName:item.keyName, actionType:item.actionType, param:item.param, icon:item.icon})
                                 }
-                                root.close()
+                                if (shortcutController.saveShortcuts(values)) root.close()
                             }
                         }
                     }

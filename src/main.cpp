@@ -10,6 +10,7 @@
 #include "AppIconProvider.h"
 #include "MqttHandler.h"
 #include "ShareManager.h"
+#include "ShortcutController.h"
 
 static void messageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg)
 {
@@ -69,6 +70,8 @@ int main(int argc, char *argv[])
 
     MqttHandler mqttHandler;
     engine.rootContext()->setContextProperty("mqttHandler", &mqttHandler);
+    ShortcutController shortcutController;
+    engine.rootContext()->setContextProperty("shortcutController", &shortcutController);
 
     // 3. 图标 Provider 注册
     engine.addImageProvider("appicon", new AppIconProvider());

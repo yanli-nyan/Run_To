@@ -88,6 +88,14 @@ bool JsonCommandDispatcher::parsePayload(const QByteArray &payload,
 
 bool JsonCommandDispatcher::executeCommand(const QString &command)
 {
+    if (command.trimmed().startsWith("K", Qt::CaseInsensitive))
+    {
+        if (m_shortcutHandler)
+            return m_shortcutHandler(command.trimmed().toUpper());
+        qWarning() << "[Dispatcher] 未设置快捷键处理器:" << command;
+        return false;
+    }
+
     // 优先匹配精确指令
     if (m_handlers.contains(command))
     {
@@ -140,4 +148,9 @@ void JsonCommandDispatcher::unregisterHandler(const QString &commandKey)
 void JsonCommandDispatcher::setDefaultHandler(HandlerFunc handler)
 {
     m_defaultHandler = handler;
+}
+
+void JsonCommandDispatcher::setShortcutHandler(HandlerFunc handler)
+{
+    m_shortcutHandler = handler;
 }

@@ -63,6 +63,7 @@ public:
      * @brief 设置未匹配到特定指令时的通用兜底处理逻辑
      */
     void setDefaultHandler(HandlerFunc handler);
+    void setShortcutHandler(HandlerFunc handler);
 
 signals:
     // 指令成功解析信号（供 UI 层或日志层监听）
@@ -73,5 +74,5 @@ signals:
 private:
     QHash<QString, HandlerFunc> m_handlers;
     HandlerFunc m_defaultHandler;
+    HandlerFunc m_shortcutHandler;
 };
-

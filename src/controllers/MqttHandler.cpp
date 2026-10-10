@@ -5,12 +5,14 @@
 #include <QJsonValue>
 #include <QJsonParseError>
 #include "ConfigLauncher.h"
+#include "ShortcutController.h"
 
 
 MqttHandler::MqttHandler(QObject *parent) : QObject(parent)
 {
     m_client = new QMqttClient(this);
     m_dispatcher = new JsonCommandDispatcher(this);
+    auto *shortcutController = new ShortcutController(m_dispatcher);
 
     connect(m_client, &QMqttClient::connected, this, &MqttHandler::handleConnected);
     connect(m_client, &QMqttClient::disconnected, this, &MqttHandler::handleDisconnected);
@@ -46,6 +48,8 @@ MqttHandler::MqttHandler(QObject *parent) : QObject(parent)
 
     m_dispatcher->setDefaultHandler([](const QString &cmd)
                                     { return ConfigLauncher::launchByCharacter(cmd); });
+    m_dispatcher->setShortcutHandler([shortcutController](const QString &cmd)
+                                     { return shortcutController->executeShortcut(cmd); });
 
     // 2. 注册特定字符/指令的独立分支逻辑示例
     m_dispatcher->registerHandler("REBOOT", [](const QString &val)

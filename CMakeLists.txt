@@ -18,6 +18,7 @@ qt_add_executable(appRun_To
     src/controllers/AppLauncher.cpp
     src/controllers/ConfigLauncher.cpp
     src/controllers/JsonCommandDispatcher.cpp
+    src/controllers/ShortcutController.cpp
 )
 
 qt_add_qml_module(appRun_To
@@ -41,6 +42,7 @@ qt_add_qml_module(appRun_To
         src/controllers/AppLauncher.h
         src/controllers/ConfigLauncher.h
         src/controllers/JsonCommandDispatcher.h
+        src/controllers/ShortcutController.h
 
     RESOURCES
         assets/Run.png
