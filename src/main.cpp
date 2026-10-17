@@ -1,4 +1,4 @@
-#include <QGuiApplication>
+#include <QApplication>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QQmlContext>
@@ -44,7 +44,10 @@ int main(int argc, char *argv[])
 
     qInstallMessageHandler(messageHandler);
 
-    QGuiApplication app(argc, argv);
+    // Qt.labs.platform 的 SystemTrayIcon / Menu 在 Windows 上由 QWidgetPlatform 实现，
+    // 它要求进程中存在真正的 QApplication（仅 QGuiApplication 会导致
+    // "No native SystemTrayIcon/Menu implementation available"）。
+    QApplication app(argc, argv);
     
     app.setQuitOnLastWindowClosed(false);
 

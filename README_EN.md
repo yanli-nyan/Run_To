@@ -21,7 +21,7 @@
 The current source uses Windows APIs (`windows.h`, Shell links, native icon extraction, console code pages), so it is intended for **Windows**.
 
 - CMake 3.16 or newer
-- A C++17-capable compiler (the existing build cache uses MinGW)
+- A C++17-capable compiler (MSVC 2022, Qt kit `msvc2022_64`)
 - Qt **6.8 or newer** with the following components:
   - Quick
   - Quick Controls 2
@@ -32,7 +32,7 @@ The current source uses Windows APIs (`windows.h`, Shell links, native icon extr
 
 ## Build
 
-Open a terminal configured for your Qt toolchain, then configure and build. Replace `<Qt-prefix>` with the directory that contains your Qt kit, for example `D:/Qt/6.8.3/mingw_64`.
+Open a terminal configured for your Qt toolchain, then configure and build. Replace `<Qt-prefix>` with the directory that contains your Qt kit, for example `D:/Workspace/SDKs/Qt/6.8.3/msvc2022_64`.
 
 ```powershell
 cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=<Qt-prefix>
@@ -42,7 +42,13 @@ cmake --build build
 The executable is normally generated beneath the build directory. For a distributable Windows folder, use the `windeployqt` tool that belongs to the same Qt kit, then place `config.json` beside the executable.
 
 ```powershell
-<Qt-prefix>/bin/windeployqt.exe <path-to>/appRun_To.exe
+<Qt-prefix>/bin/windeployqt.exe --release --qmldir qml --dir dist <path-to>/appRun_To.exe
+```
+
+Alternatively, deploy through the CMake install step (`CMakeLists.txt` wires the official QML deployment script, which copies the runtime and all QML modules):
+
+```powershell
+cmake --install build --config Release --prefix dist
 ```
 
 ## First-run configuration

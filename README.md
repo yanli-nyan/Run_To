@@ -21,7 +21,7 @@
 当前源码使用 Windows API（`windows.h`、快捷方式处理、原生图标提取、控制台代码页），因此目标平台为 **Windows**。
 
 - CMake 3.16 或更高版本
-- 支持 C++17 的编译器（现有构建缓存使用 MinGW）
+- 支持 C++17 的编译器（MSVC 2022，Qt Kit 使用 `msvc2022_64`）
 - Qt **6.8 或更高版本**，并安装以下模块：
   - Quick
   - Quick Controls 2
@@ -32,7 +32,7 @@
 
 ## 构建
 
-在已配置 Qt 工具链的终端中执行。将 `<Qt-prefix>` 替换为 Qt Kit 目录，例如 `D:/Qt/6.8.3/mingw_64`：
+在已配置 Qt 工具链的终端中执行。将 `<Qt-prefix>` 替换为 Qt Kit 目录，例如 `D:/Workspace/SDKs/Qt/6.8.3/msvc2022_64`：
 
 ```powershell
 cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=<Qt-prefix>
@@ -42,7 +42,13 @@ cmake --build build
 可执行文件通常生成在构建目录中。若要生成可分发的 Windows 程序目录，请使用同一 Qt Kit 的 `windeployqt`，再将 `config.json` 放到可执行文件旁边：
 
 ```powershell
-<Qt-prefix>/bin/windeployqt.exe <path-to>/appRun_To.exe
+<Qt-prefix>/bin/windeployqt.exe --release --qmldir qml --dir dist <path-to>/appRun_To.exe
+```
+
+也可以直接用 CMake 的安装步骤完成部署（`CMakeLists.txt` 已接入官方 QML 部署脚本，会自动复制运行库与全部 QML 模块）：
+
+```powershell
+cmake --install build --config Release --prefix dist
 ```
 
 ## 首次配置

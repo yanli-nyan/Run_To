@@ -86,3 +86,21 @@ install(TARGETS appRun_To
     LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+
+# ---------------------------------------------------------------------------
+# 官方 QML 部署脚本。
+# 本项目用 qt_add_qml_module 把 QML 编译进 qrc，windeployqt 无法扫描 qrc
+# 内部的 import，因此单独运行 windeployqt 得到的目录里 qml/ 是空的、
+# 程序启动会报 “module QtQuick.Controls plugin not found”。
+# 该脚本在 `cmake --install <build-dir> --prefix <dist-dir>` 时正确
+# 复制 Qt 运行库、平台插件与全部 QML 模块。
+# ---------------------------------------------------------------------------
+if(WIN32)
+    qt_generate_deploy_qml_app_script(
+        TARGET appRun_To
+        OUTPUT_SCRIPT deploy_qml_script
+        NO_UNSUPPORTED_PLATFORM_ERROR
+    )
+    install(SCRIPT ${deploy_qml_script})
+endif()
+
