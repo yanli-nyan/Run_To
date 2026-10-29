@@ -35,6 +35,29 @@ inline QString filePath(const QString &fileName)
     return QDir(configDir()).filePath(fileName);
 }
 
+// config 文件夹下的 feishu 子目录，存放飞书命令表（commands.json）
+inline QString feishuDir()
+{
+    return QDir(configDir()).filePath(QStringLiteral("feishu"));
+}
+
+// feishu 子目录中的具体文件
+inline QString feishuFilePath(const QString &fileName)
+{
+    return QDir(feishuDir()).filePath(fileName);
+}
+
+// 确保 feishu 子目录存在（首次启动时自动创建）
+inline bool ensureFeishuDir()
+{
+    QDir dir(feishuDir());
+    if (dir.exists())
+    {
+        return true;
+    }
+    return QDir().mkpath(feishuDir());
+}
+
 // 确保 config 文件夹存在（首次启动时自动创建）
 inline bool ensureDir()
 {

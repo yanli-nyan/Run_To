@@ -152,6 +152,51 @@ On connect the client also publishes a retained capability list to `home/feishu/
 
 > Never publish command topics with `retain`. A retained command would be replayed and executed every time the PC comes online.
 
+### Command table (`config/feishu/commands.json`)
+
+The Feishu command word mapping is owned by the PC and stored in `config/feishu/commands.json` (the `config` folder one level above the executable). A ready-to-use default table is generated on first launch, and edits are hot-reloaded without restarting the application.
+
+```json
+{
+  "schema": 1,
+  "minPowerDelay": 60,
+  "allowedSenders": ["ou_xxxxxxxx"],
+  "unknownReply": "未识别的命令：{raw}",
+  "commands": [
+    {
+      "id": "restart",
+      "enabled": true,
+      "match": { "type": "exact", "patterns": ["重启", "重启电脑"] },
+      "action": "power.restart",
+      "params": { "delay": 60 },
+      "reply": "已计划 60 秒后重启"
+    }
+  ]
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `schema` | Config format version, currently 1 |
+| `minPowerDelay` | Countdown floor for power actions. The PC enforces a **hard floor of 30 seconds**; config can raise it but never lower it |
+| `allowedSenders` | Feishu `open_id` values allowed to send commands; empty disables the check |
+| `unknownReply` | Reply template for unrecognised commands; `{raw}` is replaced by the original text |
+| `commands` | Command entries, **matched in order and the first hit wins**, so order expresses priority |
+
+`match.type` supports three modes:
+
+| type | Semantics | Example |
+| --- | --- | --- |
+| `exact` | Equal to one of `patterns` | "重启" |
+| `prefix` | Starts with `pattern`; the remainder is stored under `captureAs` | "启动 N1" → `character=N1` |
+| `regex` | Regex match; named capture groups merge into `params` | custom commands |
+
+Normalisation only trims, collapses whitespace, converts full-width to half-width, and lowercases ASCII. There is deliberately **no natural-language understanding**.
+
+After connecting, the PC publishes the whole table to `home/feishu/config` (retained, QoS 1). The relay subscribes, performs the text → action mapping, and caches it on disk so it keeps working while the PC is offline. The topic is republished whenever the file changes.
+
+**Fault tolerance**: if the JSON is malformed, the PC keeps the last valid table and logs a warning instead of losing command capability. An invalid entry (duplicate `id`, unknown `action`, empty `patterns`) is skipped individually while the rest stays active.
+
 ## Using the UI
 
 - Click an application card to view or edit its name, path, fallback icon character, and color; it can also be launched immediately.

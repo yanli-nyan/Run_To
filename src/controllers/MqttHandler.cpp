@@ -9,36 +9,40 @@
 #include "ConfigLauncher.h"
 #include "ShortcutController.h"
 #include "SystemController.h"
+#include "FeishuConfig.h"
 
 const QString MqttHandler::kEsp32Topic = QStringLiteral("home/esp32");
 const QString MqttHandler::kFeishuTopic = QStringLiteral("home/feishu");
 const QString MqttHandler::kFeishuAckTopic = QStringLiteral("home/feishu/ack");
 const QString MqttHandler::kFeishuCapsTopic = QStringLiteral("home/feishu/caps");
+const QString MqttHandler::kFeishuConfigTopic = QStringLiteral("home/feishu/config");
 
 namespace
 {
-// 命令倒计时下限。给"发错指令"留一个可以撤销的窗口，
-// 上位机侧强制不低于该值，报文里带更小的 delay 也会被抬到这里。
-constexpr int kMinPowerDelaySec = 60;
-
-int readDelay(const QVariantMap &params)
-{
-    bool ok = false;
-    int delay = params.value("delay").toInt(&ok);
-    if (!ok || delay < kMinPowerDelaySec)
-        delay = kMinPowerDelaySec;
-    return delay;
-}
+// 命令倒计时下限由 config/feishu/commands.json 的 minPowerDelay 决定，
+// 但 PC 侧始终保一个硬下限（见 FeishuConfig::kHardMinPowerDelaySec）：
+// 配置只能把倒计时调长，不能调到更短使撤销窗口失效。
 } // namespace
 
 MqttHandler::MqttHandler(QObject *parent)
     : m_client(nullptr), m_dispatcher(nullptr),
-      m_shortcutController(nullptr), m_systemController(nullptr), QObject(parent)
+      m_shortcutController(nullptr), m_systemController(nullptr),
+      m_feishuConfig(nullptr), QObject(parent)
 {
     m_client = new QMqttClient(this);
     m_dispatcher = new JsonCommandDispatcher(this);
     m_shortcutController = new ShortcutController(this);
     m_systemController = new SystemController(this);
+    m_feishuConfig = new FeishuConfig(this);
+
+    // 命令表加载：缺失时生成默认表，写坏时沿用上一次有效配置
+    m_feishuConfig->load();
+    connect(m_feishuConfig, &FeishuConfig::configReloaded, this, [this]()
+            {
+        if (m_client && m_client->state() == QMqttClient::Connected)
+        {
+            publishFeishuConfig();
+        } });
 
     // home/feishu 面向外部输入，只接受信封报文，禁止 value/character 兜底匹配
     m_dispatcher->setStrictTopic(kFeishuTopic, true);
@@ -84,7 +88,7 @@ MqttHandler::MqttHandler(QObject *parent)
     m_dispatcher->registerHandler("REBOOT", [this](const QString &)
                                   {
             QString detail;
-            return m_systemController->restart(kMinPowerDelaySec, detail); });
+            return m_systemController->restart(m_feishuConfig->minPowerDelay(), detail); });
 
     m_dispatcher->registerHandler("VOLUME_MUTE", [this](const QString &)
                                   {
@@ -102,6 +106,16 @@ MqttHandler::MqttHandler(QObject *parent)
 
     // 实例构造时自动从本地读取已保存的配置
     loadSettings();
+}
+
+int MqttHandler::readDelay(const QVariantMap &params) const
+{
+    bool ok = false;
+    int delay = params.value("delay").toInt(&ok);
+    const int floor = m_feishuConfig ? m_feishuConfig->minPowerDelay() : FeishuConfig::kDefaultPowerDelaySec;
+    if (!ok || delay < floor)
+        delay = floor;
+    return delay;
 }
 
 void MqttHandler::registerActionHandlers()
@@ -316,8 +330,9 @@ void MqttHandler::handleConnected()
     subscribeToTopic(kEsp32Topic);
     subscribeToTopic(kFeishuTopic);
 
-    // 能力清单用 retained 发布，中继重连后能立刻读到
+    // 能力清单与命令表都用 retained 发布，中继重连后能立刻读到
     publishCaps();
+    publishFeishuConfig();
 }
 
 void MqttHandler::publishCaps()
@@ -331,7 +346,10 @@ void MqttHandler::publishCaps()
         QStringLiteral("shortcut.run"), QStringLiteral("media.control"),
         QStringLiteral("clipboard.set"), QStringLiteral("notify.show")};
     caps["actions"] = actions;
-    caps["min_power_delay"] = kMinPowerDelaySec;
+    caps["min_power_delay"] = m_feishuConfig ? m_feishuConfig->minPowerDelay()
+                                             : FeishuConfig::kDefaultPowerDelaySec;
+    caps["config_topic"] = kFeishuConfigTopic;
+    caps["commands"] = m_feishuConfig ? static_cast<int>(m_feishuConfig->commandCount()) : 0;
 
     const QByteArray payload = QJsonDocument(caps).toJson(QJsonDocument::Compact);
     if (m_client->state() == QMqttClient::Connected)
@@ -339,6 +357,18 @@ void MqttHandler::publishCaps()
         m_client->publish(QMqttTopicName(kFeishuCapsTopic), payload, 1, true);
         qDebug() << "已发布能力清单至" << kFeishuCapsTopic;
     }
+}
+
+void MqttHandler::publishFeishuConfig()
+{
+    if (!m_feishuConfig || m_client->state() != QMqttClient::Connected)
+        return;
+
+    const QByteArray payload = QJsonDocument(m_feishuConfig->toPublishJson())
+                                   .toJson(QJsonDocument::Compact);
+    m_client->publish(QMqttTopicName(kFeishuConfigTopic), payload, 1, true);
+    qInfo() << "已发布飞书命令表至" << kFeishuConfigTopic << "，条目数:"
+            << m_feishuConfig->commandCount();
 }
 
 void MqttHandler::handleDisconnected()
@@ -353,18 +383,73 @@ void MqttHandler::handleMessage(const QByteArray &message, const QMqttTopicName 
     if (!checkSender(topic.name(), message))
         return;
 
+    // 兜底入口：飞书主题收到 {"text": "重启"} 时，由 PC 用同一份命令表自行映射。
+    // 正常链路是 Armbian 完成映射后发 action 信封，这里只是自测与中继失效时的容错。
+    if (topic.name() == kFeishuTopic)
+    {
+        const QJsonObject obj = QJsonDocument::fromJson(message).object();
+        if (!obj.contains("action") && obj.contains("text"))
+        {
+            QVariantMap out;
+            if (!resolveTextEnvelope(obj.toVariantMap(), out))
+                return; // 已发出 unknown 回执
+
+            QJsonObject rewritten;
+            rewritten["v"] = 1;
+            rewritten["action"] = out.value("action").toString();
+            rewritten["params"] = QJsonObject::fromVariantMap(out.value("params").toMap());
+            rewritten["msg_id"] = obj.value("msg_id").toString();
+            rewritten["ts"] = obj.value("ts").toDouble(0);
+            rewritten["from"] = obj.value("from").toString();
+            processDeviceData(topic.name(),
+                              QJsonDocument(rewritten).toJson(QJsonDocument::Compact));
+            return;
+        }
+    }
+
     processDeviceData(topic.name(), message);
+}
+
+bool MqttHandler::resolveTextEnvelope(const QVariantMap &envelope, QVariantMap &outAction)
+{
+    const QString raw = envelope.value("text").toString();
+    const QString msgId = envelope.value("msg_id").toString();
+
+    if (!m_feishuConfig || m_feishuConfig->commandCount() == 0)
+    {
+        const QString detail = QStringLiteral("命令表为空，无法映射文本: %1").arg(raw);
+        qWarning() << "[飞书]" << detail;
+        publishAck(QString(), msgId, QStringLiteral("unknown"), detail);
+        return false;
+    }
+
+    const QVariantMap result = m_feishuConfig->resolveText(raw);
+    if (!result.contains("action"))
+    {
+        const QString detail = m_feishuConfig->unknownReply().replace("{raw}", raw);
+        qInfo() << "[飞书] 未识别命令:" << raw;
+        publishAck(QString(), msgId, QStringLiteral("unknown"), detail);
+        return false;
+    }
+
+    outAction = result;
+    return true;
 }
 
 bool MqttHandler::checkSender(const QString &topic, const QByteArray &payload)
 {
     // 只对飞书主题做发送者校验；home/esp32 由设备直发，没有 from 字段
-    if (topic != kFeishuTopic || m_allowedSender.isEmpty())
+    if (topic != kFeishuTopic)
+        return true;
+
+    // 白名单以 config/feishu/commands.json 为准；为空表示未启用校验
+    const QStringList allowed = m_feishuConfig ? m_feishuConfig->allowedSenders() : QStringList();
+    if (allowed.isEmpty())
         return true;
 
     const QJsonObject obj = QJsonDocument::fromJson(payload).object();
     const QString from = obj.value("from").toString().trimmed();
-    if (from == m_allowedSender)
+    if (allowed.contains(from))
         return true;
 
     const QString detail = QString("发送者不在白名单: %1").arg(from.isEmpty() ? QStringLiteral("(缺失 from)") : from);

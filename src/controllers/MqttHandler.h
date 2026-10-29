@@ -10,6 +10,7 @@
 class JsonCommandDispatcher;
 class ShortcutController;
 class SystemController;
+class FeishuConfig;
 
 class MqttHandler : public QObject
 {
@@ -33,6 +34,8 @@ public:
     static const QString kFeishuAckTopic;
     /** 能力清单主题，retained，中继据此决定转发哪些动作 */
     static const QString kFeishuCapsTopic;
+    /** 命令表主题，retained，Armbian 据此完成「文本 → action」映射 */
+    static const QString kFeishuConfigTopic;
 
     explicit MqttHandler(QObject *parent = nullptr);
 
@@ -64,6 +67,9 @@ public:
     // 内部唯一的快捷键控制器，供 QML 与 MQTT 指令共用同一份状态
     ShortcutController *shortcutController() const { return m_shortcutController; }
 
+    // 飞书命令表配置，供 QML 展示当前生效的命令
+    FeishuConfig *feishuConfig() const { return m_feishuConfig; }
+
 signals:
     void connectionSuccess();
     void connectionError(const QString &errorMsg);
@@ -85,12 +91,18 @@ private:
     void saveSettings(const QString &host, quint16 port, const QString &user, const QString &password);
     void processDeviceData(const QString &topicName, const QByteArray &payload);
 
+    /** 根据配置下限决定本次动作的电源倒计时秒数 */
+    int readDelay(const QVariantMap &params) const;
     /** 注册信封格式的全部 action 处理器 */
     void registerActionHandlers();
     /** 发布 retained 能力清单，供中继读取 */
     void publishCaps();
+    /** 发布 retained 命令表，供 Armbian 侧映射使用 */
+    void publishFeishuConfig();
     /** 校验来自飞书主题的消息是否满足发送者白名单，不通过时已发出 denied 回执 */
     bool checkSender(const QString &topic, const QByteArray &payload);
+    /** PC 侧兜底映射：把 {"text": "重启"} 转成 {action, params}，用于自测与中继失效兜底 */
+    bool resolveTextEnvelope(const QVariantMap &envelope, QVariantMap &outAction);
     /** 发布执行回执 */
     void publishAck(const QString &action, const QString &msgId,
                     const QString &status, const QString &detail);
@@ -99,12 +111,14 @@ private:
     JsonCommandDispatcher *m_dispatcher;
     ShortcutController *m_shortcutController;
     SystemController *m_systemController;
+    FeishuConfig *m_feishuConfig;
 
     // 持久化字段缓存
     QString m_host;
     quint16 m_port = 1883;
     QString m_user;
     QString m_password;
+    // 兼容旧版 QSettings 配置的发送者白名单，已迁移到 config/feishu/commands.json
     QString m_allowedSender;
 };
 

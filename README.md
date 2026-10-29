@@ -152,6 +152,51 @@ home/feishu  飞书命令，信封格式，严格模式
 
 > 命令主题**不得使用 retained 发布**，否则 PC 每次上线都会立刻收到一条历史命令并执行。
 
+### 命令表配置（`config/feishu/commands.json`）
+
+飞书命令词的映射表由 PC 维护，保存在 exe 上一级目录的 `config/feishu/commands.json`，首次启动自动生成一份可直接使用的默认表。改完保存即热重载，不需要重启程序。
+
+```json
+{
+  "schema": 1,
+  "minPowerDelay": 60,
+  "allowedSenders": ["ou_xxxxxxxx"],
+  "unknownReply": "未识别的命令：{raw}",
+  "commands": [
+    {
+      "id": "restart",
+      "enabled": true,
+      "match": { "type": "exact", "patterns": ["重启", "重启电脑"] },
+      "action": "power.restart",
+      "params": { "delay": 60 },
+      "reply": "已计划 60 秒后重启"
+    }
+  ]
+}
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `schema` | 配置格式版本，当前固定为 1 |
+| `minPowerDelay` | 电源类动作倒计时下限。**PC 侧硬下限 30 秒**，配置只能上调，低于 30 一律按 30 处理 |
+| `allowedSenders` | 允许发送命令的飞书 `open_id`，为空表示不校验 |
+| `unknownReply` | 未识别命令的回显模板，`{raw}` 替换为原文 |
+| `commands` | 命令条目数组，**按顺序匹配，首个命中即停止**，优先级由排列顺序表达 |
+
+每条命令的 `match.type` 支持三种：
+
+| type | 语义 | 示例 |
+| --- | --- | --- |
+| `exact` | 与 `patterns` 中任一项完全相等 | 「重启」 |
+| `prefix` | 以 `pattern` 开头，剩余部分写入 `captureAs` | 「启动 N1」→ `character=N1` |
+| `regex` | 正则匹配，命名捕获组直接并入 `params` | 「音量调到 ...」 |
+
+文本归一化只做去首尾空白、合并连续空白、全角转半角、ASCII 小写，**不做语义理解**。
+
+PC 连接成功后会把这整份命令表以 retained 方式发布到 `home/feishu/config`，Armbian 订阅后据此完成「文本 → action」映射并落盘缓存，因此 PC 未启动时中继仍能工作。配置文件变化后会自动重新发布。
+
+**容错**：配置 JSON 写坏时 PC 沿用上一次有效的命令表并打印告警，不会让程序直接失去命令能力；单条命令非法（`id` 重复、`action` 不在白名单、`patterns` 为空）只跳过该条，其余照常生效。
+
 ## 界面使用
 
 - 点击应用卡片可查看或编辑名称、路径、备用图标字符和颜色，也可立即启动。

@@ -21,6 +21,7 @@ qt_add_executable(Run_To
     src/controllers/JsonCommandDispatcher.cpp
     src/controllers/ShortcutController.cpp
     src/controllers/SystemController.cpp
+    src/controllers/FeishuConfig.cpp
 )
 
 qt_add_qml_module(Run_To
@@ -47,6 +48,7 @@ qt_add_qml_module(Run_To
         src/controllers/JsonCommandDispatcher.h
         src/controllers/ShortcutController.h
         src/controllers/SystemController.h
+        src/controllers/FeishuConfig.h
         src/controllers/ConfigPaths.h
 
     RESOURCES
@@ -107,4 +109,3 @@ if(WIN32)
     )
     install(SCRIPT ${deploy_qml_script})
 endif()
-
