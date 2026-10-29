@@ -42,14 +42,45 @@ bool AppLauncher::launch(const QString &targetPath,
         return ok;
     }
 
-    // 2. 处理普通可执行文件 (.exe)
-    // 自动将工作目录设置为该程序所在目录，避免目标程序因相对路径找不到自身依赖的 DLL 或资源
+    // 2. 工作目录默认取目标文件所在目录
     QString actualWorkingDir = workingDir;
     if (actualWorkingDir.isEmpty())
     {
         actualWorkingDir = fileInfo.absolutePath();
     }
 
+    // 3. 脚本文件：CreateProcess 无法直接把 .ps1 当程序启动（返回 193 ERROR_BAD_EXE_FORMAT），
+    //    .bat/.cmd 依赖 ShellExecute 兜底且拿不到工作目录与参数。
+    //    这里统一显式交给对应的解释器，脚本路径与参数分开传递，空格不会被误切。
+    const QString suffix = fileInfo.suffix().toLower();
+    if (suffix == QStringLiteral("ps1") || suffix == QStringLiteral("bat") ||
+        suffix == QStringLiteral("cmd"))
+    {
+        QString program;
+        QStringList fullArgs;
+        if (suffix == QStringLiteral("ps1"))
+        {
+            program = QStringLiteral("powershell.exe");
+            fullArgs << QStringLiteral("-NoProfile") << QStringLiteral("-ExecutionPolicy")
+                     << QStringLiteral("Bypass") << QStringLiteral("-File") << cleanPath;
+        }
+        else
+        {
+            program = QStringLiteral("cmd.exe");
+            fullArgs << QStringLiteral("/c") << cleanPath;
+        }
+        fullArgs.append(arguments);
+
+        const bool scriptStarted = QProcess::startDetached(program, fullArgs, actualWorkingDir);
+        if (!scriptStarted)
+        {
+            qWarning() << "[AppLauncher] 脚本启动失败 ->" << cleanPath;
+        }
+        return scriptStarted;
+    }
+
+    // 4. 处理普通可执行文件 (.exe)
+    // 自动将工作目录设置为该程序所在目录，避免目标程序因相对路径找不到自身依赖的 DLL 或资源
     // 以独立进程模式分离运行（主程序退出不会影响被启动的软件）
     bool started = QProcess::startDetached(cleanPath, arguments, actualWorkingDir);
     if (!started)

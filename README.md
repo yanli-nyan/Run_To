@@ -79,6 +79,8 @@ cmake --install build --config Release --prefix dist
 
 每个模块都会保存 `name`、`color`、`character`；`path` 是可选字段，但要由指令启动应用时必须存在且指向有效文件。
 
+`path` **除 `.exe` / `.lnk` 外还接受脚本**（`.ps1` / `.bat` / `.cmd`），与「快捷键」里「启动应用」的路径规则一致：脚本会被显式交给 `powershell.exe -File` 或 `cmd.exe /c` 执行，工作目录自动设为脚本所在目录。详细约定见下文「脚本执行的约定」。
+
 ## MQTT 指令协议
 
 连接成功后，客户端会订阅两个命令主题：
@@ -220,6 +222,123 @@ PC 连接成功后会把这整份命令表以 retained 方式发布到 `home/fei
 - 脚本类功能的参数以 `--名字=值` 追加到命令行，**不经过 shell 拼接**，命令词里的引号或空格不会被解释成额外命令；
 - 脚本扩展名有白名单限制，不放开 `.dll` / `.msi` 之类，避免配置被改坏后变成任意文件执行入口；
 - 新功能扩展方式：把脚本放到 `config/feishu/scripts/`，在 `features` 里加一条，**不需要改代码、不需要重新编译、不需要重启程序**（保存即热重载）。
+
+#### 脚本路径怎么填
+
+`target` **两种写法都支持**，不用写死绝对路径也可以：
+
+| 写法 | 示例 | 解析结果 |
+| --- | --- | --- |
+| 相对 `config` 目录 | `"scripts/deploy.ps1"` | `config/scripts/deploy.ps1` |
+| 相对 `config/feishu` 目录 | `"scripts/deploy.ps1"`（放在 feishu 下时） | `config/feishu/scripts/deploy.ps1` |
+| 绝对路径 | `"D:/Tools/deploy.ps1"` | 原样使用 |
+
+实际规则很简单：**相对路径以 `config` 目录为基准**（见 `FeatureMap::resolveScriptPath`），所以 `"scripts/deploy.ps1"` 对应 `config/scripts/deploy.ps1`；只有想把脚本放在 `config/feishu/` 里时，才写成 `"feishu/scripts/deploy.ps1"`。目标文件不存在不会在加载时报错，只在执行时返回 `脚本不存在: <解析后的绝对路径>`——排查路径问题时看这条回执最快。
+
+#### 完整可抄示例
+
+`config/feishu/commands.json`：
+
+```json
+{
+  "schema": 1,
+  "features": {
+    "cleanup": {
+      "type": "script",
+      "target": "scripts/cleanup.ps1",
+      "params": { "days": 30 }
+    },
+    "backup": {
+      "type": "script",
+      "target": "D:/Tools/backup.bat"
+    }
+  }
+}
+```
+
+`config/scripts/cleanup.ps1`：
+
+```powershell
+param([int]$days = 7)
+# 参数以 --days=30 形式传入：脚本里用 param() 或直接读 $args 都行
+Write-Output "清理 $days 天前的临时文件"
+Get-ChildItem $env:TEMP -Recurse -File |
+    Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$days) } |
+    Remove-Item -Force -ErrorAction SilentlyContinue
+exit 0
+```
+
+触发方式（两种都行）：
+
+```powershell
+# A. 旧式 value 分支，指令名直接命中 features 的键
+mosquitto_pub -h <broker> -t home/esp32 -m '{"value":"cleanup"}'
+
+# B. 飞书信封分支
+mosquitto_pub -h <broker> -t home/feishu -m '{"v":1,"action":"shortcut.run","params":{"key":"K1"},"msg_id":"om_x","ts":1761726970}'
+```
+
+注意 A 这条只对 `home/esp32` 生效（`home/feishu` 是严格模式，见上文）。要让脚本也能从飞书触发，需要在 `commands` 里加一条把中文映射到某个 `action`，再在 `features` 里把该 `action` 指到脚本——但 `action` 必须是白名单里的名字，脚本类功能目前只能通过 `value` 分支或 `shortcut.run` 间接到达。
+
+#### 脚本执行的约定
+
+- 后缀白名单：`.ps1` / `.bat` / `.cmd` / `.exe`，其余后缀在加载时就被拒绝并记一条错误；
+- `.ps1` 用 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File` 运行，所以不用改系统执行策略；
+- 工作目录自动设为脚本所在目录，脚本里可以直接用相对路径；
+- 参数以 `--名字=值` 追加，不经过 shell，带空格或引号的命令词不会被拆成额外命令；
+- 超时 **30 秒**，超时会被 kill 并回 `脚本执行超时（30 秒）`；退出码非 0 视为失败，stderr 会被截取前 200 字符放进回执；
+- 扩展名是 `.exe` 时直接执行该程序，参数同样以 `--名字=值` 传入。
+
+## 快捷键配置（`config/key.json`）
+
+“快捷键”对话框为 6 键宏键盘的 K1–K6 各配置一个动作：组合快捷键、启动应用、发送文本、多媒体控制，保存到 `config/key.json`。MQTT 的 `shortcut.run` 指令通过 `{"key":"K3"}` 执行同一份配置。
+
+组合快捷键的 `param` 用 `+` 连接的**英文键名**表示：
+
+| 写法 | 含义 |
+| --- | --- |
+| `Ctrl + C` | 复制 |
+| `Win + D` | 显示桌面 |
+| `Win + R` | 打开“运行” |
+| `Ctrl + Shift + Esc` | 任务管理器 |
+| `Win + Space` | 切换输入法 / 键盘布局 |
+| `Alt + F4` | 关闭当前窗口 |
+| `Ctrl + Space` | 中英文切换 |
+
+写法规则：
+
+- 修饰键固定写 `Ctrl` / `Alt` / `Shift` / `Win`；**Win 指 Windows 徽标键**，不要写成 `Windows`、`Super`、`Meta` 或 ⊞ 符号。
+- 普通字符键直接写该字符（`C`、`V`、`1`），不区分大小写。
+- 空格、方向键等功能键没有可打印字符，必须写键名：`Space`、`Enter`、`Tab`、`Esc`、`Backspace`、`Delete`、`Insert`、`Home`、`End`、`PageUp`、`PageDown`、`Up`、`Down`、`Left`、`Right`、`F1`–`F24`。
+- `+` 两侧空格可有可无，`Ctrl+C` 与 `Ctrl + C` 等价；全角的 `＋` 和全角空格会自动转成半角。
+- 键名必须是 ASCII 半角字符，中文“空格键”“回车键”不会被识别。
+
+> **`Win + Space` 是系统级热键，它与 `Win + D` 这类普通组合键走不同的发送路径**：单独一个 Win 键会分段发送并留出间隔，否则按下与抬起在同一瞬间被合并、等于没按。旧版本没有 `Space` 键名、解析失败还会静默不生效，现已支持。
+
+`config/key.json` 结构：
+
+```json
+{
+  "version": "1.0",
+  "keys": [
+    { "keyId": 1, "keyName": "按键 1", "actionType": "组合快捷键", "param": "Win + Space", "icon": "⌨️" },
+    { "keyId": 2, "keyName": "按键 2", "actionType": "组合快捷键", "param": "Ctrl + C", "icon": "📋" }
+  ]
+}
+```
+
+`actionType` 取值 `组合快捷键` / `启动应用` / `发送文本` / `多媒体控制`；`启动应用` 的 `param` 是程序或脚本路径，`多媒体控制` 的 `param` 含“静音”时按静音，否则按播放/暂停。
+
+「启动应用」的 `param` 支持以下类型：
+
+| 后缀 | 实际执行方式 |
+| --- | --- |
+| `.exe` | `QProcess::startDetached` 直接启动，工作目录为程序所在目录 |
+| `.lnk` | 经 ShellExecute 打开，保留快捷方式内的参数与工作目录 |
+| `.ps1` | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File` 执行，不用改系统执行策略 |
+| `.bat` / `.cmd` | `cmd.exe /c` 执行 |
+
+脚本类的工作目录自动设为脚本所在目录，脚本里可以直接用相对路径。路径含空格也无需加引号——脚本路径与参数是分开传给解释器的，不会被拆断。
 
 ## 界面使用
 

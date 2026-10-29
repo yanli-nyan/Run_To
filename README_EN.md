@@ -221,6 +221,113 @@ Notes:
 - Script extensions are whitelisted; `.dll` and `.msi` are deliberately excluded so a broken config cannot become an arbitrary file execution entry point.
 - To add a feature: drop a script into `config/feishu/scripts/` and add an entry under `features`. **No code change, no rebuild, no restart** — the file is hot-reloaded on save.
 
+#### How to fill in the script path
+
+`target` accepts **either form** — an absolute path is not required:
+
+| Value | Example | Resolved to |
+| --- | --- | --- |
+| Relative to the `config` folder | `"scripts/deploy.ps1"` | `config/scripts/deploy.ps1` |
+| Relative to `config/feishu` | `"feishu/scripts/deploy.ps1"` | `config/feishu/scripts/deploy.ps1` |
+| Absolute path | `"D:/Tools/deploy.ps1"` | used as-is |
+
+The rule is simply: **a relative path is resolved against the `config` folder** (`FeatureMap::resolveScriptPath`). A missing file is not rejected at load time; execution returns `脚本不存在: <resolved absolute path>`, which is the fastest way to debug a wrong path.
+
+#### Copy-paste example
+
+`config/feishu/commands.json`:
+
+```json
+{
+  "schema": 1,
+  "features": {
+    "cleanup": { "type": "script", "target": "scripts/cleanup.ps1", "params": { "days": 30 } },
+    "backup":  { "type": "script", "target": "D:/Tools/backup.bat" }
+  }
+}
+```
+
+`config/scripts/cleanup.ps1`:
+
+```powershell
+param([int]$days = 7)
+# Parameters arrive as --days=30; use param() or read $args directly
+Write-Output "Cleaning files older than $days days"
+Get-ChildItem $env:TEMP -Recurse -File |
+    Where-Object { $_.LastWriteTime -lt (Get-Date).AddDays(-$days) } |
+    Remove-Item -Force -ErrorAction SilentlyContinue
+exit 0
+```
+
+Trigger it:
+
+```powershell
+# A. Legacy value branch — the command name matches a key under features
+mosquitto_pub -h <broker> -t home/esp32 -m '{"value":"cleanup"}'
+```
+
+Note that A only works on `home/esp32`; `home/feishu` is strict mode and accepts envelopes only. To reach a script from Feishu, map a Chinese phrase to a whitelisted `action` in `commands` — a script feature itself is reachable through the `value` branch or indirectly via `shortcut.run`.
+
+#### Script execution contract
+
+- Suffix whitelist: `.ps1`, `.bat`, `.cmd`, `.exe`; anything else is rejected at load time and recorded as an error;
+- `.ps1` runs through `powershell.exe -NoProfile -ExecutionPolicy Bypass -File`, so the machine execution policy does not need changing;
+- the working directory is set to the script's folder, so relative paths inside the script work;
+- parameters are appended as `--name=value` and never go through a shell;
+- **30 second** timeout — the process is killed and the relay gets `脚本执行超时（30 秒）`; a non-zero exit code is a failure and up to 200 characters of stderr are put into the acknowledgement;
+- for `.exe` the program is started directly with the same `--name=value` arguments.
+
+## Shortcut configuration (`config/key.json`)
+
+The **Shortcuts** dialog assigns one action to each of the six macro-keyboard keys K1–K6: combo shortcut, launch application, send text, or media control. The result is stored in `config/key.json`, and the MQTT command `shortcut.run` with `{"key":"K3"}` executes the same configuration.
+
+For a combo shortcut, `param` is a `+`-separated list of **English key names**:
+
+| Value | Meaning |
+| --- | --- |
+| `Ctrl + C` | Copy |
+| `Win + D` | Show desktop |
+| `Win + R` | Open "Run" |
+| `Ctrl + Shift + Esc` | Task Manager |
+| `Win + Space` | Switch input method / keyboard layout |
+| `Alt + F4` | Close the active window |
+| `Ctrl + Space` | Toggle IME |
+
+Rules:
+
+- Modifiers are `Ctrl`, `Alt`, `Shift`, and `Win`. **`Win` means the Windows logo key**; do not write `Windows`, `Super`, `Meta`, or the ⊞ symbol.
+- Plain character keys are written as the character itself (`C`, `V`, `1`); case does not matter.
+- Keys without a printable character must use a key name: `Space`, `Enter`, `Tab`, `Esc`, `Backspace`, `Delete`, `Insert`, `Home`, `End`, `PageUp`, `PageDown`, `Up`, `Down`, `Left`, `Right`, `F1`–`F24`.
+- Spaces around `+` are optional, so `Ctrl+C` equals `Ctrl + C`. Full-width `＋` and full-width spaces are normalised to half-width automatically.
+- Key names must be ASCII; Chinese names such as "空格键" are not recognised.
+
+> **`Win + Space` is a system-level hotkey and takes a different send path than ordinary combos such as `Win + D`**: a lone Win key is emitted key-by-key with a short gap, otherwise the key-down and key-up are merged into one instant and nothing happens. Older versions had no `Space` key name and failed silently; this is supported now.
+
+Structure of `config/key.json`:
+
+```json
+{
+  "version": "1.0",
+  "keys": [
+    { "keyId": 1, "keyName": "Key 1", "actionType": "组合快捷键", "param": "Win + Space", "icon": "⌨️" },
+    { "keyId": 2, "keyName": "Key 2", "actionType": "组合快捷键", "param": "Ctrl + C", "icon": "📋" }
+  ]
+}
+```
+
+`actionType` is one of `组合快捷键`, `启动应用`, `发送文本`, `多媒体控制`. For `启动应用` the `param` is a program or script path; for `多媒体控制` a `param` containing "静音"/"mute" means mute, anything else means play/pause.
+
+Types accepted by `启动应用`:
+
+| Suffix | How it is started |
+| --- | --- |
+| `.exe` | `QProcess::startDetached`, working directory set to the program's folder |
+| `.lnk` | opened through ShellExecute, keeping embedded arguments and working directory |
+| `.ps1` | `powershell.exe -NoProfile -ExecutionPolicy Bypass -File`, so the machine execution policy does not need changing |
+| `.bat` / `.cmd` | `cmd.exe /c` |
+
+For scripts the working directory is set to the script's folder, so relative paths inside the script work. Paths containing spaces need no quoting — the script path and its arguments are passed to the interpreter separately.
+
 ## Using the UI
 
 - Click an application card to view or edit its name, path, fallback icon character, and color; it can also be launched immediately.
