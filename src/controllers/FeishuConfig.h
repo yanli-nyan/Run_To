@@ -18,6 +18,8 @@
  * PC 是该配置的唯一来源：负责解析、校验、热重载，并把整份配置通过 retained MQTT
  * 主题 home/feishu/config 下发给 Armbian，由 Armbian 侧完成「文本 → action」映射。
  */
+class FeatureMap;
+
 class FeishuConfig : public QObject
 {
     Q_OBJECT
@@ -29,6 +31,9 @@ class FeishuConfig : public QObject
     Q_PROPERTY(QStringList lastErrors READ lastErrors NOTIFY configReloaded)
 
 public:
+    /** 指令 → 功能映射表（配置中的 features 字段） */
+    FeatureMap *featureMap() const { return m_featureMap; }
+
     /** PC 侧硬下限：配置只能往上调，不能调到更小值使倒计时失效 */
     static constexpr int kHardMinPowerDelaySec = 30;
     /** 配置默认值：未配置 minPowerDelay 时使用 */
@@ -90,5 +95,6 @@ private:
     int m_minPowerDelay = kDefaultPowerDelaySec;
     QStringList m_lastErrors;
 
+    FeatureMap *m_featureMap = nullptr;
     QFileSystemWatcher *m_watcher;
 };

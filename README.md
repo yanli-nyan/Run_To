@@ -197,6 +197,30 @@ PC 连接成功后会把这整份命令表以 retained 方式发布到 `home/fei
 
 **容错**：配置 JSON 写坏时 PC 沿用上一次有效的命令表并打印告警，不会让程序直接失去命令能力；单条命令非法（`id` 重复、`action` 不在白名单、`patterns` 为空）只跳过该条，其余照常生效。
 
+### 指令 → 功能映射表（`features`）
+
+中文到指令的映射在 Armbian 侧完成，PC 侧只负责「拿到指令名 → 执行什么功能」。这段映射写在同一个配置文件里：
+
+```json
+"features": {
+  "restart": { "type": "builtin", "target": "power.restart", "params": { "delay": 60 } },
+  "deploy":  { "type": "script",  "target": "scripts/deploy.ps1", "params": {} }
+}
+```
+
+| type | target | 含义 |
+| --- | --- | --- |
+| `builtin` | 动作名（如 `power.restart`） | 交给内置能力执行，动作名必须在内置动作表内 |
+| `script` | 相对 `config` 目录的脚本路径 | 运行外部脚本，支持 `.ps1` / `.bat` / `.cmd` / `.exe` |
+| `action` | 动作名 | 与 `builtin` 等价，保留兼容 armbian 直接下发 action 的报文 |
+
+要点：
+
+- **未在 `features` 中出现的指令沿用内置默认表**（restart / shutdown / cancel / lock / sleep / mute / launch / notify），配置文件缺失也照常可用；
+- 脚本类功能的参数以 `--名字=值` 追加到命令行，**不经过 shell 拼接**，命令词里的引号或空格不会被解释成额外命令；
+- 脚本扩展名有白名单限制，不放开 `.dll` / `.msi` 之类，避免配置被改坏后变成任意文件执行入口；
+- 新功能扩展方式：把脚本放到 `config/feishu/scripts/`，在 `features` 里加一条，**不需要改代码、不需要重新编译、不需要重启程序**（保存即热重载）。
+
 ## 界面使用
 
 - 点击应用卡片可查看或编辑名称、路径、备用图标字符和颜色，也可立即启动。

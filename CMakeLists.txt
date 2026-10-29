@@ -22,6 +22,7 @@ qt_add_executable(Run_To
     src/controllers/ShortcutController.cpp
     src/controllers/SystemController.cpp
     src/controllers/FeishuConfig.cpp
+    src/controllers/FeatureMap.cpp
 )
 
 qt_add_qml_module(Run_To
@@ -49,6 +50,7 @@ qt_add_qml_module(Run_To
         src/controllers/ShortcutController.h
         src/controllers/SystemController.h
         src/controllers/FeishuConfig.h
+        src/controllers/FeatureMap.h
         src/controllers/ConfigPaths.h
 
     RESOURCES

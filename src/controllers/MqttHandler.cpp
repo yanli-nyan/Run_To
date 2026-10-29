@@ -10,6 +10,7 @@
 #include "ShortcutController.h"
 #include "SystemController.h"
 #include "FeishuConfig.h"
+#include "FeatureMap.h"
 
 const QString MqttHandler::kEsp32Topic = QStringLiteral("home/esp32");
 const QString MqttHandler::kFeishuTopic = QStringLiteral("home/feishu");
@@ -35,10 +36,24 @@ MqttHandler::MqttHandler(QObject *parent)
     m_systemController = new SystemController(this);
     m_feishuConfig = new FeishuConfig(this);
 
+    // 指令 → 功能映射表：内置动作交回本类执行，本类不重复实现动作逻辑
+    m_feishuConfig->featureMap()->setBuiltinRunner(
+        [this](const QString &action, const QVariantMap &params, QString &detail)
+        {
+            if (!m_actionExecutor)
+            {
+                detail = QStringLiteral("动作执行器未就绪");
+                return false;
+            }
+            return m_actionExecutor(action, params, detail);
+        });
+
     // 命令表加载：缺失时生成默认表，写坏时沿用上一次有效配置
     m_feishuConfig->load();
     connect(m_feishuConfig, &FeishuConfig::configReloaded, this, [this]()
             {
+        // 配置热重载后指令表可能变化，重新登记到分发器
+        registerFeatureCommands();
         if (m_client && m_client->state() == QMqttClient::Connected)
         {
             publishFeishuConfig();
@@ -97,6 +112,7 @@ MqttHandler::MqttHandler(QObject *parent)
 
     // 信封动作分支（home/feishu）
     registerActionHandlers();
+    registerFeatureCommands();
 
     // 3. 关联信号
     connect(m_dispatcher, &JsonCommandDispatcher::commandExtracted,
@@ -120,36 +136,36 @@ int MqttHandler::readDelay(const QVariantMap &params) const
 
 void MqttHandler::registerActionHandlers()
 {
-    // ---- 电源类：不可逆动作，统一带倒计时与 kMinPowerDelaySec 下限 ----
-    m_dispatcher->registerActionHandler(QStringLiteral("power.restart"),
-                                        [this](const QVariantMap &params, QString &detail)
-                                        {
-        return m_systemController->restart(readDelay(params), detail); });
+    // 动作实现集中在一张表里：
+    // 1) 逐条注册到分发器，供 home/feishu 的 action 信封直接使用；
+    // 2) 同一个表也作为 FeatureMap 的内置执行器，避免两套实现漂移。
+    QHash<QString, JsonCommandDispatcher::ActionHandlerFunc> actions;
 
-    m_dispatcher->registerActionHandler(QStringLiteral("power.shutdown"),
-                                        [this](const QVariantMap &params, QString &detail)
-                                        {
-        return m_systemController->shutdown(readDelay(params), detail); });
+    // ---- 电源类：不可逆动作，统一带倒计时与配置下限 ----
+    actions[QStringLiteral("power.restart")] =
+        [this](const QVariantMap &params, QString &detail)
+    { return m_systemController->restart(readDelay(params), detail); };
 
-    m_dispatcher->registerActionHandler(QStringLiteral("power.cancel"),
-                                        [this](const QVariantMap &, QString &detail)
-                                        {
-        return m_systemController->cancelShutdown(detail); });
+    actions[QStringLiteral("power.shutdown")] =
+        [this](const QVariantMap &params, QString &detail)
+    { return m_systemController->shutdown(readDelay(params), detail); };
 
-    m_dispatcher->registerActionHandler(QStringLiteral("power.lock"),
-                                        [this](const QVariantMap &, QString &detail)
-                                        {
-        return m_systemController->lockWorkstation(detail); });
+    actions[QStringLiteral("power.cancel")] =
+        [this](const QVariantMap &, QString &detail)
+    { return m_systemController->cancelShutdown(detail); };
 
-    m_dispatcher->registerActionHandler(QStringLiteral("power.sleep"),
-                                        [this](const QVariantMap &, QString &detail)
-                                        {
-        return m_systemController->sleep(detail); });
+    actions[QStringLiteral("power.lock")] =
+        [this](const QVariantMap &, QString &detail)
+    { return m_systemController->lockWorkstation(detail); };
+
+    actions[QStringLiteral("power.sleep")] =
+        [this](const QVariantMap &, QString &detail)
+    { return m_systemController->sleep(detail); };
 
     // ---- 应用与快捷键：只接受本地标识，路径永不来自报文 ----
-    m_dispatcher->registerActionHandler(QStringLiteral("app.launch"),
-                                        [](const QVariantMap &params, QString &detail)
-                                        {
+    actions[QStringLiteral("app.launch")] =
+        [](const QVariantMap &params, QString &detail)
+    {
         const QString character = params.value("character").toString().trimmed();
         if (character.isEmpty())
         {
@@ -159,11 +175,12 @@ void MqttHandler::registerActionHandlers()
         const bool ok = ConfigLauncher::launchByCharacter(character);
         detail = ok ? QStringLiteral("已启动 character=%1 对应的程序").arg(character)
                     : QStringLiteral("未找到 character=%1 对应的可启动程序").arg(character);
-        return ok; });
+        return ok;
+    };
 
-    m_dispatcher->registerActionHandler(QStringLiteral("shortcut.run"),
-                                        [this](const QVariantMap &params, QString &detail)
-                                        {
+    actions[QStringLiteral("shortcut.run")] =
+        [this](const QVariantMap &params, QString &detail)
+    {
         const QString key = params.value("key").toString().trimmed();
         if (key.isEmpty())
         {
@@ -173,34 +190,37 @@ void MqttHandler::registerActionHandlers()
         const bool ok = m_shortcutController->executeShortcut(key);
         detail = ok ? QStringLiteral("已执行快捷键 %1").arg(key)
                     : QStringLiteral("快捷键 %1 执行失败（检查 key.json 中是否存在该编号）").arg(key);
-        return ok; });
+        return ok;
+    };
 
     // ---- 与本机交互类 ----
-    m_dispatcher->registerActionHandler(QStringLiteral("media.control"),
-                                        [this](const QVariantMap &params, QString &detail)
-                                        {
+    actions[QStringLiteral("media.control")] =
+        [this](const QVariantMap &params, QString &detail)
+    {
         const QString op = params.value("op").toString().trimmed();
         if (op.isEmpty())
         {
             detail = QStringLiteral("params.op 为空");
             return false;
         }
-        return m_systemController->mediaControl(op, detail); });
+        return m_systemController->mediaControl(op, detail);
+    };
 
-    m_dispatcher->registerActionHandler(QStringLiteral("clipboard.set"),
-                                        [this](const QVariantMap &params, QString &detail)
-                                        {
+    actions[QStringLiteral("clipboard.set")] =
+        [this](const QVariantMap &params, QString &detail)
+    {
         const QString text = params.value("text").toString();
         if (text.isEmpty())
         {
             detail = QStringLiteral("params.text 为空");
             return false;
         }
-        return m_systemController->setClipboardText(text, detail); });
+        return m_systemController->setClipboardText(text, detail);
+    };
 
-    m_dispatcher->registerActionHandler(QStringLiteral("notify.show"),
-                                        [this](const QVariantMap &params, QString &detail)
-                                        {
+    actions[QStringLiteral("notify.show")] =
+        [this](const QVariantMap &params, QString &detail)
+    {
         const QString text = params.value("text").toString();
         if (text.isEmpty())
         {
@@ -214,16 +234,31 @@ void MqttHandler::registerActionHandlers()
                                                              : QStringLiteral("飞书提醒"),
                              text);
         detail = QStringLiteral("已弹出通知");
-        return true; });
+        return true;
+    };
 
     // ---- 未知命令：只记录，不执行 ----
-    m_dispatcher->registerActionHandler(QStringLiteral("unknown"),
-                                        [](const QVariantMap &params, QString &detail)
-                                        {
+    actions[QStringLiteral("unknown")] =
+        [](const QVariantMap &params, QString &detail)
+    {
         const QString raw = params.value("raw").toString();
         detail = QStringLiteral("未识别命令，未执行: %1").arg(raw);
         qWarning() << "[飞书] 未识别命令:" << raw;
-        return false; });
+        return false;
+    };
+
+    for (auto it = actions.constBegin(); it != actions.constEnd(); ++it)
+        m_dispatcher->registerActionHandler(it.key(), it.value());
+
+    m_actionExecutor = [actions](const QString &action, const QVariantMap &params, QString &detail)
+    {
+        if (!actions.contains(action))
+        {
+            detail = QStringLiteral("未注册的动作: %1").arg(action);
+            return false;
+        }
+        return actions.value(action)(params, detail);
+    };
 }
 
 void MqttHandler::loadSettings()
@@ -505,4 +540,41 @@ void MqttHandler::tryAutoConnect()
     {
         qDebug() << "[启动自连] 本地未配置 MQTT 地址，跳过自动连接";
     }
+}
+bool MqttHandler::executeFeature(const QString &command, const QVariantMap &params, QString &detail)
+{
+    if (!m_feishuConfig || !m_feishuConfig->featureMap())
+    {
+        detail = QStringLiteral("功能表未初始化");
+        return false;
+    }
+
+    QVariantMap effective;
+    const bool ok = m_feishuConfig->featureMap()->execute(command, params, effective, detail);
+    if (ok && detail.isEmpty())
+        detail = QStringLiteral("指令 %1 执行成功").arg(command);
+    return ok;
+}
+
+void MqttHandler::registerFeatureCommands()
+{
+    if (!m_feishuConfig || !m_feishuConfig->featureMap())
+        return;
+
+    const QStringList commands = m_feishuConfig->featureMap()->commands();
+    for (const QString &command : commands)
+    {
+        // 指令名走旧式 value 分支：Armbian 可以直接下发 {"value": "restart"}，
+        // 与 home/esp32 的语义一致，便于中继简单拼报文。
+        m_dispatcher->registerHandler(command, [this, command](const QString &)
+                                      {
+            QString detail;
+            const bool ok = executeFeature(command, QVariantMap(), detail);
+            if (ok)
+                qInfo() << "[功能表]" << command << "|" << detail;
+            else
+                qWarning() << "[功能表]" << command << "|" << detail;
+            return ok; });
+    }
+    qInfo() << "[功能表] 已登记" << commands.size() << "条指令到分发器";
 }

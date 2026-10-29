@@ -5,6 +5,7 @@
 #include <QMqttClient>
 #include <QSettings>
 #include <QtQml/qqmlregistration.h>
+#include <functional>
 #include "JsonCommandDispatcher.h"
 
 class JsonCommandDispatcher;
@@ -95,10 +96,14 @@ private:
     int readDelay(const QVariantMap &params) const;
     /** 注册信封格式的全部 action 处理器 */
     void registerActionHandlers();
+    /** 执行一个指令名对应的功能（内置动作或外部脚本） */
+    bool executeFeature(const QString &command, const QVariantMap &params, QString &detail);
     /** 发布 retained 能力清单，供中继读取 */
     void publishCaps();
     /** 发布 retained 命令表，供 Armbian 侧映射使用 */
     void publishFeishuConfig();
+    /** 把 FeishuConfig 的指令表注入分发器，使 home/feishu 指令名可直接执行 */
+    void registerFeatureCommands();
     /** 校验来自飞书主题的消息是否满足发送者白名单，不通过时已发出 denied 回执 */
     bool checkSender(const QString &topic, const QByteArray &payload);
     /** PC 侧兜底映射：把 {"text": "重启"} 转成 {action, params}，用于自测与中继失效兜底 */
@@ -106,6 +111,10 @@ private:
     /** 发布执行回执 */
     void publishAck(const QString &action, const QString &msgId,
                     const QString &status, const QString &detail);
+
+    /** 内置动作执行器：把 action 名 + params 交给具体能力实现 */
+    using ActionExecutor = std::function<bool(const QString &action, const QVariantMap &params, QString &detail)>;
+    ActionExecutor m_actionExecutor;
 
     QMqttClient *m_client;
     JsonCommandDispatcher *m_dispatcher;

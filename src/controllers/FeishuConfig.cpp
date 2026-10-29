@@ -1,5 +1,6 @@
 #include "FeishuConfig.h"
 #include "ConfigPaths.h"
+#include "FeatureMap.h"
 
 #include <QCoreApplication>
 #include <QDebug>
@@ -22,6 +23,7 @@ const char *kSupportedMatchTypes[] = {"exact", "prefix", "regex"};
 FeishuConfig::FeishuConfig(QObject *parent)
     : QObject(parent), m_watcher(nullptr)
 {
+    m_featureMap = new FeatureMap(this);
 }
 
 QString FeishuConfig::configPath() const
@@ -117,12 +119,29 @@ bool FeishuConfig::writeDefaultConfig()
     launchCmd["reply"] = QStringLiteral("正在启动 {character}");
     commands.append(launchCmd);
 
+    // 指令 → 功能 映射表：armbian 映射出的指令名在这里决定执行什么。
+    // 新增功能优先改这里，脚本类示例见 scripts 节点（path 相对 config 目录）。
+    QJsonObject features;
+    features["restart"] = QJsonObject{{"type", "builtin"}, {"target", "power.restart"},
+                                       {"params", QJsonObject{{"delay", kDefaultPowerDelaySec}}}};
+    features["shutdown"] = QJsonObject{{"type", "builtin"}, {"target", "power.shutdown"},
+                                        {"params", QJsonObject{{"delay", kDefaultPowerDelaySec}}}};
+    features["cancel"] = QJsonObject{{"type", "builtin"}, {"target", "power.cancel"}};
+    features["lock"] = QJsonObject{{"type", "builtin"}, {"target", "power.lock"}};
+    features["sleep"] = QJsonObject{{"type", "builtin"}, {"target", "power.sleep"}};
+    features["mute"] = QJsonObject{{"type", "builtin"}, {"target", "media.control"},
+                                    {"params", QJsonObject{{"op", "mute"}}}};
+    features["launch"] = QJsonObject{{"type", "builtin"}, {"target", "app.launch"},
+                                      {"captureAs", "character"}};
+    features["notify"] = QJsonObject{{"type", "builtin"}, {"target", "notify.show"}};
+
     QJsonObject root;
     root["schema"] = 1;
     root["minPowerDelay"] = kDefaultPowerDelaySec;
     root["allowedSenders"] = QJsonArray();
     root["unknownReply"] = QStringLiteral("未识别的命令：{raw}");
     root["commands"] = commands;
+    root["features"] = features;
 
     QSaveFile file(configPath());
     if (!file.open(QIODevice::WriteOnly))
@@ -331,6 +350,12 @@ bool FeishuConfig::load()
 
     if (m_commands.isEmpty())
         m_lastErrors << QStringLiteral("没有任何生效的命令条目");
+
+    // 指令 → 功能 映射表：配置中的 features 覆盖内置默认值
+    QStringList featureErrors;
+    m_featureMap->load(root, featureErrors);
+    for (const QString &e : featureErrors)
+        m_lastErrors << e;
 
     // 热重载：监听文件变化，保存后自动重新加载
     if (!m_watcher)

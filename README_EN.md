@@ -197,6 +197,30 @@ After connecting, the PC publishes the whole table to `home/feishu/config` (reta
 
 **Fault tolerance**: if the JSON is malformed, the PC keeps the last valid table and logs a warning instead of losing command capability. An invalid entry (duplicate `id`, unknown `action`, empty `patterns`) is skipped individually while the rest stays active.
 
+### Command → feature map (`features`)
+
+Chinese-to-command mapping happens on the Armbian side; the PC only decides what a command name actually does. That mapping lives in the same config file:
+
+```json
+"features": {
+  "restart": { "type": "builtin", "target": "power.restart", "params": { "delay": 60 } },
+  "deploy":  { "type": "script",  "target": "scripts/deploy.ps1", "params": {} }
+}
+```
+
+| type | target | Meaning |
+| --- | --- | --- |
+| `builtin` | Action name (e.g. `power.restart`) | Runs the built-in capability; the name must exist in the built-in action table |
+| `script` | Script path relative to `config` | Runs an external script; `.ps1`, `.bat`, `.cmd`, `.exe` are supported |
+| `action` | Action name | Same as `builtin`, kept for compatibility with relays sending actions directly |
+
+Notes:
+
+- **Commands absent from `features` fall back to the built-in defaults** (restart / shutdown / cancel / lock / sleep / mute / launch / notify), so the application still works when the config file is missing.
+- Script parameters are appended as `--name=value` and **never go through a shell**, so quotes or spaces in command words cannot become extra commands.
+- Script extensions are whitelisted; `.dll` and `.msi` are deliberately excluded so a broken config cannot become an arbitrary file execution entry point.
+- To add a feature: drop a script into `config/feishu/scripts/` and add an entry under `features`. **No code change, no rebuild, no restart** — the file is hot-reloaded on save.
+
 ## Using the UI
 
 - Click an application card to view or edit its name, path, fallback icon character, and color; it can also be launched immediately.
