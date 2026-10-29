@@ -81,11 +81,14 @@ cmake --install build --config Release --prefix dist
 
 ## MQTT command protocol
 
-After connecting, the client subscribes to the fixed topic:
+After connecting, the client subscribes to two command topics:
 
 ```text
-home/esp32
+home/esp32   device/NFC commands, legacy {"value":"K1"}
+home/feishu  Feishu commands, action envelope, strict mode
 ```
+
+### Legacy format (`home/esp32`)
 
 Publish a JSON object with a `value` field. Its value is matched exactly against a module's `character` property:
 
@@ -95,9 +98,59 @@ Publish a JSON object with a `value` field. Its value is matched exactly against
 }
 ```
 
-For commands without a dedicated handler, the application attempts to launch the module whose `character` matches the received `value`. The source also registers `REBOOT` and `VOLUME_MUTE` handlers, but they currently only log that the command was handled; they do not reboot the computer or change volume.
+For commands without a dedicated handler, the application attempts to launch the module whose `character` matches the received `value`. `REBOOT` and `VOLUME_MUTE` are now wired to real behaviour: the former schedules a restart with a 60 second countdown, the latter mutes the system.
 
-This fixed topic and payload shape are compatible with an automation that converts NFC/device events into MQTT messages.
+### Envelope format (`home/feishu`)
+
+```json
+{
+  "v": 1,
+  "action": "power.restart",
+  "params": { "delay": 60 },
+  "msg_id": "om_xxxxxxxx",
+  "from": "ou_yyyyyyyy",
+  "ts": 1761726970
+}
+```
+
+- `v`, `action`, `msg_id`, and `ts` are required; `params` defaults to `{}`.
+- Commands older than **5 minutes** by `ts` are rejected with `expired`, so broker-queued commands from while the PC was offline do not fire on reconnect.
+- A given `msg_id` is executed once; duplicates within the last 100 ids get `duplicate`.
+- This topic runs in **strict mode**: only envelope payloads with `action` are accepted, and there is no `character` fallback matching.
+
+Supported actions:
+
+| action | params | Description |
+| --- | --- | --- |
+| `power.restart` | `{"delay": 60}` | Schedule a restart; a `delay` below 60 is raised to 60 |
+| `power.shutdown` | `{"delay": 60}` | Schedule a shutdown, same rule |
+| `power.cancel` | `{}` | Cancel a pending shutdown/restart (`shutdown /a`) |
+| `power.lock` | `{}` | Lock the workstation |
+| `power.sleep` | `{}` | Enter sleep |
+| `app.launch` | `{"character": "N1"}` | Launch the program whose `character` matches in `config.json`; **paths never come from the payload** |
+| `shortcut.run` | `{"key": "K3"}` | Run the shortcut with that id from `key.json` |
+| `media.control` | `{"op": "mute"}` | `mute` / `play_pause` / `volume_up` / `volume_down` |
+| `clipboard.set` | `{"text": "..."}` | Write text to the clipboard |
+| `notify.show` | `{"text": "...", "level": "info"}` | Show a tray notification |
+| `unknown` | `{"raw": "..."}` | Reported by the relay for unrecognised commands; logged only, never executed |
+
+### Receipts and capabilities
+
+Results are published to `home/feishu/ack` (retained, QoS 1) for the relay to forward back to Feishu:
+
+```json
+{ "v": 1, "msg_id": "om_xxx", "action": "power.restart", "status": "ok", "detail": "已计划 60 秒后重启", "ts": 1761726971 }
+```
+
+`status` is one of `ok` / `denied` / `expired` / `duplicate` / `failed` / `unknown`.
+
+On connect the client also publishes a retained capability list to `home/feishu/caps`, so the relay can decide which actions to forward without hardcoding them:
+
+```json
+{ "v": 1, "actions": ["power.restart", "..."], "min_power_delay": 60 }
+```
+
+> Never publish command topics with `retain`. A retained command would be replayed and executed every time the PC comes online.
 
 ## Using the UI
 
@@ -112,6 +165,8 @@ This fixed topic and payload shape are compatible with an automation that conver
 - MQTT host, username, and password are saved through `QSettings`, which is not a secure credential vault. Use a trusted Windows account and secure the broker.
 - The MQTT connection uses the configured host and port with no TLS settings exposed by the UI. Use an isolated trusted network, or extend the client to configure encrypted MQTT.
 - Any publisher authorized to write to `home/esp32` can request a configured local application launch. Restrict broker ACLs and do not use untrusted command sources.
+- `home/feishu` can trigger irreversible actions such as restart and shutdown. Configure the allowed Feishu sender `open_id` (stored in `QSettings` under `MQTT/allowedSender`; empty disables the check) and enforce sender authentication in the relay. The check in this application is defence in depth, not a substitute for the relay.
+- Power actions enforce a 60 second minimum countdown, so a mistaken command can be undone with `power.cancel` before it fires.
 - The `config` folder (`config.json`, `key.json`, `share_bundle.zip`) may expose local application paths and module identifiers; treat its files as sensitive.
 
 ## Project layout

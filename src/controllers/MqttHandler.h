@@ -8,6 +8,8 @@
 #include "JsonCommandDispatcher.h"
 
 class JsonCommandDispatcher;
+class ShortcutController;
+class SystemController;
 
 class MqttHandler : public QObject
 {
@@ -19,8 +21,19 @@ class MqttHandler : public QObject
     Q_PROPERTY(quint16 port READ port NOTIFY configChanged)
     Q_PROPERTY(QString user READ user NOTIFY configChanged)
     Q_PROPERTY(QString password READ password NOTIFY configChanged)
+    // 飞书命令允许的发送者 open_id；留空表示不做校验（不建议）
+    Q_PROPERTY(QString allowedSender READ allowedSender NOTIFY configChanged)
 
 public:
+    /** 设备/NFC 指令主题（旧格式 {"value":"K1"} 兼容） */
+    static const QString kEsp32Topic;
+    /** 飞书命令主题（信封格式，严格模式） */
+    static const QString kFeishuTopic;
+    /** 执行回执主题，中继订阅后转回飞书 */
+    static const QString kFeishuAckTopic;
+    /** 能力清单主题，retained，中继据此决定转发哪些动作 */
+    static const QString kFeishuCapsTopic;
+
     explicit MqttHandler(QObject *parent = nullptr);
 
     // 属性读取函数
@@ -28,6 +41,7 @@ public:
     quint16 port() const { return m_port; }
     QString user() const { return m_user; }
     QString password() const { return m_password; }
+    QString allowedSender() const { return m_allowedSender; }
 
     Q_INVOKABLE void tryAutoConnect();
 
@@ -44,30 +58,54 @@ public:
                                      const QString &password = QString());
     Q_INVOKABLE void subscribeToTopic(const QString &topic);
 
+    // 设置飞书命令允许的发送者 open_id（留空则不做校验）
+    Q_INVOKABLE void setAllowedSender(const QString &openId);
+
+    // 内部唯一的快捷键控制器，供 QML 与 MQTT 指令共用同一份状态
+    ShortcutController *shortcutController() const { return m_shortcutController; }
+
 signals:
     void connectionSuccess();
     void connectionError(const QString &errorMsg);
     void messageReceived(const QString &topic, const QString &value);
     void configChanged();
+    /** 需要界面弹出的通知（例如飞书 notify.show 动作） */
+    void notifyRequested(const QString &title, const QString &body);
 
 private slots:
     void handleMessage(const QByteArray &message, const QMqttTopicName &topic);
     void handleConnected();
     void handleDisconnected();
+    void handleActionResult(const QString &topic, const QString &action,
+                            const QString &msgId, const QString &status,
+                            const QString &detail);
 
 private:
     void loadSettings();
     void saveSettings(const QString &host, quint16 port, const QString &user, const QString &password);
     void processDeviceData(const QString &topicName, const QByteArray &payload);
 
+    /** 注册信封格式的全部 action 处理器 */
+    void registerActionHandlers();
+    /** 发布 retained 能力清单，供中继读取 */
+    void publishCaps();
+    /** 校验来自飞书主题的消息是否满足发送者白名单，不通过时已发出 denied 回执 */
+    bool checkSender(const QString &topic, const QByteArray &payload);
+    /** 发布执行回执 */
+    void publishAck(const QString &action, const QString &msgId,
+                    const QString &status, const QString &detail);
+
     QMqttClient *m_client;
     JsonCommandDispatcher *m_dispatcher;
+    ShortcutController *m_shortcutController;
+    SystemController *m_systemController;
 
     // 持久化字段缓存
     QString m_host;
     quint16 m_port = 1883;
     QString m_user;
     QString m_password;
+    QString m_allowedSender;
 };
 
 #endif // MQTTHANDLER_H

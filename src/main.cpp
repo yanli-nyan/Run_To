@@ -75,10 +75,10 @@ int main(int argc, char *argv[])
     ShareManager shareManager;
     engine.rootContext()->setContextProperty("shareManager", &shareManager);
 
+    // MqttHandler 内部持有唯一的 ShortcutController 实例（MQTT 指令与界面共用同一份 key.json 状态）
     MqttHandler mqttHandler;
     engine.rootContext()->setContextProperty("mqttHandler", &mqttHandler);
-    ShortcutController shortcutController;
-    engine.rootContext()->setContextProperty("shortcutController", &shortcutController);
+    engine.rootContext()->setContextProperty("shortcutController", mqttHandler.shortcutController());
 
     FileRevealer fileRevealer;
     engine.rootContext()->setContextProperty("fileRevealer", &fileRevealer);

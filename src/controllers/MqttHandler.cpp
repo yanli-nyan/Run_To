@@ -2,17 +2,46 @@
 #include <QDebug>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QJsonValue>
 #include <QJsonParseError>
+#include <QMqttTopicName>
 #include "ConfigLauncher.h"
 #include "ShortcutController.h"
+#include "SystemController.h"
 
+const QString MqttHandler::kEsp32Topic = QStringLiteral("home/esp32");
+const QString MqttHandler::kFeishuTopic = QStringLiteral("home/feishu");
+const QString MqttHandler::kFeishuAckTopic = QStringLiteral("home/feishu/ack");
+const QString MqttHandler::kFeishuCapsTopic = QStringLiteral("home/feishu/caps");
 
-MqttHandler::MqttHandler(QObject *parent) : QObject(parent)
+namespace
+{
+// 命令倒计时下限。给"发错指令"留一个可以撤销的窗口，
+// 上位机侧强制不低于该值，报文里带更小的 delay 也会被抬到这里。
+constexpr int kMinPowerDelaySec = 60;
+
+int readDelay(const QVariantMap &params)
+{
+    bool ok = false;
+    int delay = params.value("delay").toInt(&ok);
+    if (!ok || delay < kMinPowerDelaySec)
+        delay = kMinPowerDelaySec;
+    return delay;
+}
+} // namespace
+
+MqttHandler::MqttHandler(QObject *parent)
+    : m_client(nullptr), m_dispatcher(nullptr),
+      m_shortcutController(nullptr), m_systemController(nullptr), QObject(parent)
 {
     m_client = new QMqttClient(this);
     m_dispatcher = new JsonCommandDispatcher(this);
-    auto *shortcutController = new ShortcutController(m_dispatcher);
+    m_shortcutController = new ShortcutController(this);
+    m_systemController = new SystemController(this);
+
+    // home/feishu 面向外部输入，只接受信封报文，禁止 value/character 兜底匹配
+    m_dispatcher->setStrictTopic(kFeishuTopic, true);
 
     connect(m_client, &QMqttClient::connected, this, &MqttHandler::handleConnected);
     connect(m_client, &QMqttClient::disconnected, this, &MqttHandler::handleDisconnected);
@@ -48,26 +77,139 @@ MqttHandler::MqttHandler(QObject *parent) : QObject(parent)
 
     m_dispatcher->setDefaultHandler([](const QString &cmd)
                                     { return ConfigLauncher::launchByCharacter(cmd); });
-    m_dispatcher->setShortcutHandler([shortcutController](const QString &cmd)
-                                     { return shortcutController->executeShortcut(cmd); });
+    m_dispatcher->setShortcutHandler([this](const QString &cmd)
+                                     { return m_shortcutController->executeShortcut(cmd); });
 
-    // 2. 注册特定字符/指令的独立分支逻辑示例
-    m_dispatcher->registerHandler("REBOOT", [](const QString &val)
+    // 旧式指令分支（home/esp32）：保留原有语义，仅把空实现的处理器转发到实际能力
+    m_dispatcher->registerHandler("REBOOT", [this](const QString &)
                                   {
-            qDebug() << "执行系统重启逻辑...";
-            return true; });
+            QString detail;
+            return m_systemController->restart(kMinPowerDelaySec, detail); });
 
-    m_dispatcher->registerHandler("VOLUME_MUTE", [](const QString &val)
+    m_dispatcher->registerHandler("VOLUME_MUTE", [this](const QString &)
                                   {
-            qDebug() << "执行静音操作...";
-            return true; });
+            QString detail;
+            return m_systemController->mediaControl(QStringLiteral("mute"), detail); });
+
+    // 信封动作分支（home/feishu）
+    registerActionHandlers();
 
     // 3. 关联信号
     connect(m_dispatcher, &JsonCommandDispatcher::commandExtracted,
             this, &MqttHandler::messageReceived);
+    connect(m_dispatcher, &JsonCommandDispatcher::actionResult,
+            this, &MqttHandler::handleActionResult);
 
     // 实例构造时自动从本地读取已保存的配置
     loadSettings();
+}
+
+void MqttHandler::registerActionHandlers()
+{
+    // ---- 电源类：不可逆动作，统一带倒计时与 kMinPowerDelaySec 下限 ----
+    m_dispatcher->registerActionHandler(QStringLiteral("power.restart"),
+                                        [this](const QVariantMap &params, QString &detail)
+                                        {
+        return m_systemController->restart(readDelay(params), detail); });
+
+    m_dispatcher->registerActionHandler(QStringLiteral("power.shutdown"),
+                                        [this](const QVariantMap &params, QString &detail)
+                                        {
+        return m_systemController->shutdown(readDelay(params), detail); });
+
+    m_dispatcher->registerActionHandler(QStringLiteral("power.cancel"),
+                                        [this](const QVariantMap &, QString &detail)
+                                        {
+        return m_systemController->cancelShutdown(detail); });
+
+    m_dispatcher->registerActionHandler(QStringLiteral("power.lock"),
+                                        [this](const QVariantMap &, QString &detail)
+                                        {
+        return m_systemController->lockWorkstation(detail); });
+
+    m_dispatcher->registerActionHandler(QStringLiteral("power.sleep"),
+                                        [this](const QVariantMap &, QString &detail)
+                                        {
+        return m_systemController->sleep(detail); });
+
+    // ---- 应用与快捷键：只接受本地标识，路径永不来自报文 ----
+    m_dispatcher->registerActionHandler(QStringLiteral("app.launch"),
+                                        [](const QVariantMap &params, QString &detail)
+                                        {
+        const QString character = params.value("character").toString().trimmed();
+        if (character.isEmpty())
+        {
+            detail = QStringLiteral("params.character 为空");
+            return false;
+        }
+        const bool ok = ConfigLauncher::launchByCharacter(character);
+        detail = ok ? QStringLiteral("已启动 character=%1 对应的程序").arg(character)
+                    : QStringLiteral("未找到 character=%1 对应的可启动程序").arg(character);
+        return ok; });
+
+    m_dispatcher->registerActionHandler(QStringLiteral("shortcut.run"),
+                                        [this](const QVariantMap &params, QString &detail)
+                                        {
+        const QString key = params.value("key").toString().trimmed();
+        if (key.isEmpty())
+        {
+            detail = QStringLiteral("params.key 为空");
+            return false;
+        }
+        const bool ok = m_shortcutController->executeShortcut(key);
+        detail = ok ? QStringLiteral("已执行快捷键 %1").arg(key)
+                    : QStringLiteral("快捷键 %1 执行失败（检查 key.json 中是否存在该编号）").arg(key);
+        return ok; });
+
+    // ---- 与本机交互类 ----
+    m_dispatcher->registerActionHandler(QStringLiteral("media.control"),
+                                        [this](const QVariantMap &params, QString &detail)
+                                        {
+        const QString op = params.value("op").toString().trimmed();
+        if (op.isEmpty())
+        {
+            detail = QStringLiteral("params.op 为空");
+            return false;
+        }
+        return m_systemController->mediaControl(op, detail); });
+
+    m_dispatcher->registerActionHandler(QStringLiteral("clipboard.set"),
+                                        [this](const QVariantMap &params, QString &detail)
+                                        {
+        const QString text = params.value("text").toString();
+        if (text.isEmpty())
+        {
+            detail = QStringLiteral("params.text 为空");
+            return false;
+        }
+        return m_systemController->setClipboardText(text, detail); });
+
+    m_dispatcher->registerActionHandler(QStringLiteral("notify.show"),
+                                        [this](const QVariantMap &params, QString &detail)
+                                        {
+        const QString text = params.value("text").toString();
+        if (text.isEmpty())
+        {
+            detail = QStringLiteral("params.text 为空");
+            return false;
+        }
+        const QString level = params.contains("level")
+                                  ? params.value("level").toString()
+                                  : QStringLiteral("info");
+        emit notifyRequested(level == QStringLiteral("warn") ? QStringLiteral("飞书提醒（警告）")
+                                                             : QStringLiteral("飞书提醒"),
+                             text);
+        detail = QStringLiteral("已弹出通知");
+        return true; });
+
+    // ---- 未知命令：只记录，不执行 ----
+    m_dispatcher->registerActionHandler(QStringLiteral("unknown"),
+                                        [](const QVariantMap &params, QString &detail)
+                                        {
+        const QString raw = params.value("raw").toString();
+        detail = QStringLiteral("未识别命令，未执行: %1").arg(raw);
+        qWarning() << "[飞书] 未识别命令:" << raw;
+        return false; });
 }
 
 void MqttHandler::loadSettings()
@@ -78,9 +220,14 @@ void MqttHandler::loadSettings()
     m_port = static_cast<quint16>(settings.value("port", 1883).toUInt());
     m_user = settings.value("user", "").toString();
     m_password = settings.value("password", "").toString();
+    m_allowedSender = settings.value("allowedSender", "").toString();
     settings.endGroup();
 
     qDebug() << "已加载 MQTT 配置，Host:" << (m_host.isEmpty() ? "(未配置)" : m_host);
+    if (m_allowedSender.isEmpty())
+    {
+        qDebug() << "未配置飞书发送者 open_id，home/feishu 将接受任意来源的命令";
+    }
 }
 
 void MqttHandler::saveSettings(const QString &host, quint16 port,
@@ -97,9 +244,22 @@ void MqttHandler::saveSettings(const QString &host, quint16 port,
     settings.setValue("port", m_port);
     settings.setValue("user", m_user);
     settings.setValue("password", m_password);
+    settings.setValue("allowedSender", m_allowedSender);
     settings.endGroup();
     settings.sync(); // 立即刷入磁盘
 
+    emit configChanged();
+}
+
+void MqttHandler::setAllowedSender(const QString &openId)
+{
+    m_allowedSender = openId.trimmed();
+    QSettings settings;
+    settings.beginGroup("MQTT");
+    settings.setValue("allowedSender", m_allowedSender);
+    settings.endGroup();
+    settings.sync();
+    qDebug() << "飞书发送者白名单已更新:" << (m_allowedSender.isEmpty() ? "(空，不校验)" : m_allowedSender);
     emit configChanged();
 }
 
@@ -151,8 +311,34 @@ void MqttHandler::handleConnected()
     qDebug() << "MQTT 服务器连接成功！";
     emit connectionSuccess();
 
-    // 自动订阅目标主题
-    subscribeToTopic("home/esp32");
+    // 命令主题：精确订阅，不要用 home/feishu/#，
+    // 否则会把本机自己发布的 ack 也收回来形成回环。
+    subscribeToTopic(kEsp32Topic);
+    subscribeToTopic(kFeishuTopic);
+
+    // 能力清单用 retained 发布，中继重连后能立刻读到
+    publishCaps();
+}
+
+void MqttHandler::publishCaps()
+{
+    QJsonObject caps;
+    caps["v"] = 1;
+    QJsonArray actions{
+        QStringLiteral("power.restart"), QStringLiteral("power.shutdown"),
+        QStringLiteral("power.cancel"), QStringLiteral("power.lock"),
+        QStringLiteral("power.sleep"), QStringLiteral("app.launch"),
+        QStringLiteral("shortcut.run"), QStringLiteral("media.control"),
+        QStringLiteral("clipboard.set"), QStringLiteral("notify.show")};
+    caps["actions"] = actions;
+    caps["min_power_delay"] = kMinPowerDelaySec;
+
+    const QByteArray payload = QJsonDocument(caps).toJson(QJsonDocument::Compact);
+    if (m_client->state() == QMqttClient::Connected)
+    {
+        m_client->publish(QMqttTopicName(kFeishuCapsTopic), payload, 1, true);
+        qDebug() << "已发布能力清单至" << kFeishuCapsTopic;
+    }
 }
 
 void MqttHandler::handleDisconnected()
@@ -163,7 +349,57 @@ void MqttHandler::handleDisconnected()
 void MqttHandler::handleMessage(const QByteArray &message, const QMqttTopicName &topic)
 {
     qDebug() << "[后台接收] 主题:" << topic.name() << "长度:" << message.size() << "bytes";
+
+    if (!checkSender(topic.name(), message))
+        return;
+
     processDeviceData(topic.name(), message);
+}
+
+bool MqttHandler::checkSender(const QString &topic, const QByteArray &payload)
+{
+    // 只对飞书主题做发送者校验；home/esp32 由设备直发，没有 from 字段
+    if (topic != kFeishuTopic || m_allowedSender.isEmpty())
+        return true;
+
+    const QJsonObject obj = QJsonDocument::fromJson(payload).object();
+    const QString from = obj.value("from").toString().trimmed();
+    if (from == m_allowedSender)
+        return true;
+
+    const QString detail = QString("发送者不在白名单: %1").arg(from.isEmpty() ? QStringLiteral("(缺失 from)") : from);
+    qWarning() << "[飞书]" << detail;
+    publishAck(obj.value("action").toString(), obj.value("msg_id").toString(),
+               QStringLiteral("denied"), detail);
+    return false;
+}
+
+void MqttHandler::handleActionResult(const QString &topic, const QString &action,
+                                     const QString &msgId, const QString &status,
+                                     const QString &detail)
+{
+    Q_UNUSED(topic);
+    publishAck(action, msgId, status, detail);
+}
+
+void MqttHandler::publishAck(const QString &action, const QString &msgId,
+                             const QString &status, const QString &detail)
+{
+    if (m_client->state() != QMqttClient::Connected)
+        return;
+
+    QJsonObject ack;
+    ack["v"] = 1;
+    ack["msg_id"] = msgId;
+    ack["action"] = action;
+    ack["status"] = status;
+    ack["detail"] = detail;
+    ack["ts"] = QDateTime::currentDateTimeUtc().toSecsSinceEpoch();
+
+    const QByteArray payload = QJsonDocument(ack).toJson(QJsonDocument::Compact);
+    // 回执保留 10 秒即可，避免长期霸占 retained
+    m_client->publish(QMqttTopicName(kFeishuAckTopic), payload, 1, true);
+    qDebug() << "[回执]" << status << "|" << action << "|" << detail;
 }
 
 void MqttHandler::processDeviceData(const QString &topicName, const QByteArray &payload)
@@ -173,14 +409,12 @@ void MqttHandler::processDeviceData(const QString &topicName, const QByteArray &
 
 void MqttHandler::tryAutoConnect()
 {
-    // 获取当前缓存的 Host（根据实际成员变量名调整，如 m_host）
     QString host = m_host.trimmed();
 
     if (!host.isEmpty())
     {
         qDebug() << "[启动自连] 检测到配置缓存，开始自动连接 Broker:" << host;
-        // 调用现有连接接口
-        saveAndConnect(host, 1883, m_user, m_password);
+        connectToBroker(host, m_port, m_user, m_password);
     }
     else
     {

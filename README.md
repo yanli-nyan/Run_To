@@ -81,11 +81,14 @@ cmake --install build --config Release --prefix dist
 
 ## MQTT 指令协议
 
-连接成功后，客户端会订阅固定主题：
+连接成功后，客户端会订阅两个命令主题：
 
 ```text
-home/esp32
+home/esp32   设备/NFC 指令，旧格式 {"value":"K1"}
+home/feishu  飞书命令，信封格式，严格模式
 ```
+
+### 旧格式（`home/esp32`）
 
 向此主题发布包含 `value` 字段的 JSON。其值会与模块的 `character` 精确匹配：
 
@@ -95,9 +98,59 @@ home/esp32
 }
 ```
 
-对于没有专用处理器的指令，程序会尝试寻找 `character` 与收到的 `value` 相同的模块并启动其路径。源码虽注册了 `REBOOT` 和 `VOLUME_MUTE` 指令，但当前仅输出已处理的日志，不会真的重启电脑或调整音量。
+对于没有专用处理器的指令，程序会尝试寻找 `character` 与收到的 `value` 相同的模块并启动其路径。`REBOOT` 与 `VOLUME_MUTE` 已接到实际能力：前者按 60 秒倒计时重启，后者执行系统静音。
 
-固定主题和 JSON 结构可配合将 NFC/设备事件转换为 MQTT 消息的自动化使用。
+### 信封格式（`home/feishu`）
+
+```json
+{
+  "v": 1,
+  "action": "power.restart",
+  "params": { "delay": 60 },
+  "msg_id": "om_xxxxxxxx",
+  "from": "ou_yyyyyyyy",
+  "ts": 1761726970
+}
+```
+
+- `v`、`action`、`msg_id`、`ts` 为必填，`params` 可缺省为 `{}`；
+- `ts` 超过 **5 分钟** 的命令会被拒收（`expired`），防止 PC 离线期间 Broker 排队的旧命令在重连后突然执行；
+- 同一个 `msg_id` 只执行一次，最近 100 条记录内重复的消息回 `duplicate`；
+- 该主题处于**严格模式**：只接受带 `action` 的信封报文，不做 `character` 兜底匹配。
+
+支持的动作：
+
+| action | params | 说明 |
+| --- | --- | --- |
+| `power.restart` | `{"delay": 60}` | 计划重启，`delay` 低于 60 秒会被抬到 60 |
+| `power.shutdown` | `{"delay": 60}` | 计划关机，同上 |
+| `power.cancel` | `{}` | 取消已计划的关机/重启（`shutdown /a`） |
+| `power.lock` | `{}` | 锁定工作站 |
+| `power.sleep` | `{}` | 进入睡眠 |
+| `app.launch` | `{"character": "N1"}` | 启动 `config.json` 中该 `character` 对应程序；**报文不含路径** |
+| `shortcut.run` | `{"key": "K3"}` | 执行 `key.json` 中该编号的快捷键 |
+| `media.control` | `{"op": "mute"}` | `mute` / `play_pause` / `volume_up` / `volume_down` |
+| `clipboard.set` | `{"text": "..."}` | 写入剪贴板 |
+| `notify.show` | `{"text": "...", "level": "info"}` | 弹出托盘通知 |
+| `unknown` | `{"raw": "..."}` | 中继未识别命令时上报，只记日志，不执行 |
+
+### 回执与能力清单
+
+执行结果发布到 `home/feishu/ack`（retained，QoS 1），中继订阅后转回飞书：
+
+```json
+{ "v": 1, "msg_id": "om_xxx", "action": "power.restart", "status": "ok", "detail": "已计划 60 秒后重启", "ts": 1761726971 }
+```
+
+`status` 取值 `ok` / `denied` / `expired` / `duplicate` / `failed` / `unknown`。
+
+连接成功后还会向 `home/feishu/caps` 发布一份 retained 能力清单，中继据此决定转发哪些动作，新增动作时中继无需改代码：
+
+```json
+{ "v": 1, "actions": ["power.restart", "..."], "min_power_delay": 60 }
+```
+
+> 命令主题**不得使用 retained 发布**，否则 PC 每次上线都会立刻收到一条历史命令并执行。
 
 ## 界面使用
 
@@ -113,6 +166,8 @@ home/esp32
 - `config` 文件夹中的 `config.json`、`key.json` 与 `share_bundle.zip` 都可能暴露本地应用路径与模块标识符，应按敏感文件保管。
 - 界面未提供 TLS 配置；连接会使用填写的主机和端口。请使用隔离的可信网络，或自行扩展加密 MQTT 支持。
 - 任何有权向 `home/esp32` 发布消息的客户端，都可能请求启动已配置的本地应用。请严格配置 Broker ACL，且不要接受不可信指令源。
+- `home/feishu` 可触发重启、关机等不可逆动作。请在设置中填写允许的飞书发送者 `open_id`（保存在 `QSettings` 的 `MQTT/allowedSender`，留空则不校验），并在中继侧完成发送者鉴权；上位机侧的校验只是纵深防御，不能替代中继。
+- 电源类动作强制 60 秒倒计时下限，误发时可在倒计时内发送 `power.cancel` 撤销。
 - 导出的配置包可能暴露本地应用路径和模块标识符，应按敏感文件保管。
 
 ## 项目结构

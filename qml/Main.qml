@@ -373,12 +373,19 @@ ApplicationWindow {
         }
 
         function onMessageReceived(topic, value) {
-            console.log("[主界面] 收到 NFC 指令 => 主题:", topic, "| 指令:", value)
+            const fromFeishu = (topic === "home/feishu")
+            console.log("[主界面] 收到指令 => 主题:", topic, "| 指令:", value)
             myDetailPopup.editable = false
             myDetailPopup.characterText = ""
-            myDetailPopup.titleText = "收到 NFC 指令"
+            myDetailPopup.titleText = fromFeishu ? "收到飞书指令" : "收到 NFC 指令"
             myDetailPopup.contentText = "主题: " + topic + "\n指令: " + value
             myDetailPopup.open()
+        }
+
+        // 飞书 notify.show 动作等需要弹系统通知的场景
+        function onNotifyRequested(title, body) {
+            console.log("[主界面] 通知:", title, "|", body)
+            trayIcon.showMessage(title, body)
         }
     }
 }
