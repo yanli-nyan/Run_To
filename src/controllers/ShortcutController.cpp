@@ -11,11 +11,18 @@
 #include <QRegularExpression>
 #include <QDebug>
 #include "AppLauncher.h"
+#include "ConfigPaths.h"
 #ifdef Q_OS_WIN
 #include <windows.h>
 #endif
 ShortcutController::ShortcutController(QObject *p) : QObject(p) {}
-QString ShortcutController::filePath() const { return QDir(QCoreApplication::applicationDirPath()).filePath("key.json"); }
+// key.json 统一存放在 exe 上一级目录的 config 文件夹中
+QString ShortcutController::filePath() const
+{
+    ConfigPaths::ensureDir();
+    ConfigPaths::migrateLegacyFile(QStringLiteral("key.json"));
+    return ConfigPaths::filePath(QStringLiteral("key.json"));
+}
 QVariantList ShortcutController::defaultShortcuts() const
 {
     QVariantList r;

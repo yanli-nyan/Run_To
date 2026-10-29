@@ -1,5 +1,6 @@
 #include "ConfigLauncher.h"
 #include "AppLauncher.h"
+#include "ConfigPaths.h"
 
 #include <QCoreApplication>
 #include <QFile>
@@ -28,11 +29,12 @@ bool ConfigLauncher::launchByCharacter(const QString &character, const QString &
         return false;
     }
 
-    // 1. 确定 config.json 路径
+    // 1. 确定 config.json 路径（统一存放在 exe 上一级目录的 config 文件夹中）
     QString jsonPath = customJsonPath;
     if (jsonPath.isEmpty())
     {
-        jsonPath = QDir(QCoreApplication::applicationDirPath()).filePath("config.json");
+        ConfigPaths::migrateLegacyFile(QStringLiteral("config.json"));
+        jsonPath = ConfigPaths::filePath(QStringLiteral("config.json"));
     }
 
     QFile file(jsonPath);

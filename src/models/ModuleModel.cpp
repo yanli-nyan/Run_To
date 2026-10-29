@@ -1,5 +1,7 @@
 #include "ModuleModel.h"
+#include <QCoreApplication>
 #include <QDebug>
+#include <QDir>
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -48,9 +50,29 @@ QHash<int, QByteArray> ModuleModel::roleNames() const
     return roles;
 }
 
+// 配置文件统一放在「exe 上一级目录」下的 config 文件夹中（见 ConfigPaths.h）
+QString ModuleModel::configFilePath() const
+{
+    return ConfigPaths::filePath(QStringLiteral("config.json"));
+}
+
+// 确保 config 文件夹存在（首次启动时自动创建）
+bool ModuleModel::ensureConfigDir()
+{
+    if (ConfigPaths::ensureDir())
+    {
+        return true;
+    }
+
+    qWarning() << "[ModuleModel] 无法创建配置目录:" << ConfigPaths::configDir();
+    return false;
+}
+
 void ModuleModel::loadDataFromSource()
 {
-    QString configPath = "config.json";
+    ensureConfigDir();
+
+    const QString configPath = configFilePath();
     QFile file(configPath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
     {
@@ -104,7 +126,9 @@ void ModuleModel::loadDataFromSource()
 // 统一保存内存中的 m_items 到 config.json
 bool ModuleModel::saveToFile()
 {
-    const QString configPath = "config.json";
+    ensureConfigDir();
+
+    const QString configPath = configFilePath();
     QJsonObject rootObj;
 
     // 1. 若原文件已存在且有效，保留原有的外部字段（例如 version 或其他全局配置）

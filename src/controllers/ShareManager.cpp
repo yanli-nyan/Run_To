@@ -1,4 +1,5 @@
 #include "ShareManager.h"
+#include "ConfigPaths.h"
 
 #include <QCoreApplication>
 #include <QFile>
@@ -232,8 +233,14 @@ ShareManager::ShareManager(QObject *parent) : QObject(parent) {}
 
 bool ShareManager::exportSharePackage(const QString &outputZipPath)
 {
+    // 应用路径解析基准：exe 所在目录
     QString appDir = QCoreApplication::applicationDirPath();
-    QString configPath = appDir + "/config.json";
+
+    // 配置与导出产物所在目录：exe 上一级目录下的 config 文件夹
+    ConfigPaths::ensureDir();
+    ConfigPaths::migrateLegacyFile(QStringLiteral("config.json"));
+    const QString configBaseDir = ConfigPaths::configDir();
+    QString configPath = ConfigPaths::filePath(QStringLiteral("config.json"));
 
     // 1. 读取 config.json
     QFile configFile(configPath);
@@ -258,7 +265,8 @@ bool ShareManager::exportSharePackage(const QString &outputZipPath)
     QString targetZip = outputZipPath;
     if (targetZip.isEmpty())
     {
-        targetZip = appDir + "/share_bundle.zip";
+        ConfigPaths::migrateLegacyFile(QStringLiteral("share_bundle.zip"));
+        targetZip = configBaseDir + "/share_bundle.zip";
     }
 
     QZipWriter zip(targetZip);

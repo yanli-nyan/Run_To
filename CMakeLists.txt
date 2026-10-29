@@ -8,7 +8,7 @@ find_package(Qt6 REQUIRED COMPONENTS Quick Mqtt Widgets QuickControls2)
 
 qt_standard_project_setup(REQUIRES 6.8)
 
-qt_add_executable(appRun_To
+qt_add_executable(Run_To
     src/main.cpp
     src/models/ModuleModel.cpp
     src/controllers/MqttHandler.cpp
@@ -17,11 +17,12 @@ qt_add_executable(appRun_To
     src/controllers/ShareManager.cpp
     src/controllers/AppLauncher.cpp
     src/controllers/ConfigLauncher.cpp
+    src/controllers/FileRevealer.cpp
     src/controllers/JsonCommandDispatcher.cpp
     src/controllers/ShortcutController.cpp
 )
 
-qt_add_qml_module(appRun_To
+qt_add_qml_module(Run_To
     URI Run_To
     QML_FILES
         qml/Main.qml
@@ -41,8 +42,10 @@ qt_add_qml_module(appRun_To
         src/controllers/ShareManager.h
         src/controllers/AppLauncher.h
         src/controllers/ConfigLauncher.h
+        src/controllers/FileRevealer.h
         src/controllers/JsonCommandDispatcher.h
         src/controllers/ShortcutController.h
+        src/controllers/ConfigPaths.h
 
     RESOURCES
         assets/Run.png
@@ -50,20 +53,20 @@ qt_add_qml_module(appRun_To
 
 )
 
-target_include_directories(appRun_To
+target_include_directories(Run_To
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/controllers
         ${CMAKE_CURRENT_SOURCE_DIR}/src/models
 )
 
-set_target_properties(appRun_To PROPERTIES
+set_target_properties(Run_To PROPERTIES
     MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
     MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}
     MACOSX_BUNDLE TRUE
-    WIN32_EXECUTABLE FALSE
+    WIN32_EXECUTABLE TRUE
 )
 
-target_link_libraries(appRun_To
+target_link_libraries(Run_To
     PRIVATE
         Qt6::Quick
         Qt6::Mqtt
@@ -73,7 +76,7 @@ target_link_libraries(appRun_To
 )
 
 if(WIN32)
-    target_link_libraries(appRun_To
+    target_link_libraries(Run_To
         PRIVATE
             ole32
             shell32
@@ -81,9 +84,8 @@ if(WIN32)
 endif()
 
 include(GNUInstallDirs)
-install(TARGETS appRun_To
+install(TARGETS Run_To
     BUNDLE DESTINATION .
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 
@@ -97,7 +99,7 @@ install(TARGETS appRun_To
 # ---------------------------------------------------------------------------
 if(WIN32)
     qt_generate_deploy_qml_app_script(
-        TARGET appRun_To
+        TARGET Run_To
         OUTPUT_SCRIPT deploy_qml_script
         NO_UNSUPPORTED_PLATFORM_ERROR
     )

@@ -1,10 +1,13 @@
+// qmllint disable unqualified
+
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
 Popup {
     id: popup
-    width: 460
+    // 底部操作栏在编辑模式下最多同时出现 5 个按钮，故加宽以留出足够空间
+    width: 520
     implicitHeight: mainLayout.implicitHeight + 40
     modal: true
     focus: true
@@ -20,6 +23,14 @@ Popup {
     // 控制接口
     property bool editable: true
     property bool isEditing: false // 保留属性以防外部绑定报错
+
+    // 当前路径是否指向真实存在的本地文件/目录。
+    // 用它决定“打开文件位置”按钮是否出现：卡片编辑/详情弹窗里是真实路径，
+    // 而“收到 NFC 指令”“导出反馈”等弹窗里是普通文本，按钮会自动隐藏。
+    property bool canRevealPath: (typeof fileRevealer !== "undefined")
+                                 && (typeof editPathField !== "undefined")
+                                 && editPathField.text.trim() !== ""
+                                 && fileRevealer.exists(editPathField.text.trim())
 
     // 信号定义
     signal saved(string newTitle, string newContent, string newColor, string newCharacter)
@@ -335,6 +346,35 @@ Popup {
             }
 
             Item { Layout.fillWidth: true }
+
+            // 打开文件位置（仅当路径真实存在时显示）
+            // 目标是路径输入框中的值：编辑模式下即用户当前填写、尚未保存的路径
+            Button {
+                id: revealBtn
+                text: "打开位置"
+                visible: popup.canRevealPath
+                implicitHeight: 36
+                implicitWidth: 88
+                font.pixelSize: 13
+                ToolTip.visible: revealBtn.hovered
+                ToolTip.text: editPathField.text.trim()
+
+                contentItem: Text {
+                    text: revealBtn.text
+                    font: revealBtn.font
+                    color: revealBtn.hovered ? "#111827" : "#374151"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                background: Rectangle {
+                    radius: 6
+                    border.color: revealBtn.hovered ? "#9CA3AF" : "#D1D5DB"
+                    color: revealBtn.down ? "#E5E7EB" : (revealBtn.hovered ? "#F9FAFB" : "#FFFFFF")
+                }
+
+                onClicked: fileRevealer.reveal(editPathField.text.trim())
+            }
 
             // 立即运行
             Button {

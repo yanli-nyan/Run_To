@@ -2,6 +2,7 @@
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
 #include <QQmlContext>
+#include <QDir>
 #include <cstdio>
 #include <windows.h>
 
@@ -10,6 +11,7 @@
 #include "AppIconProvider.h"
 #include "MqttHandler.h"
 #include "ShareManager.h"
+#include "FileRevealer.h"
 #include "ShortcutController.h"
 
 static void messageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg)
@@ -61,6 +63,8 @@ int main(int argc, char *argv[])
 
     // 1. 数据模型
     ModuleModel myModel;
+    // 首次启动时自动创建 exe 上一级目录下的 config 文件夹
+    myModel.ensureConfigDir();
     myModel.loadDataFromSource();
     engine.rootContext()->setContextProperty("moduleModel", &myModel);
 
@@ -75,6 +79,9 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("mqttHandler", &mqttHandler);
     ShortcutController shortcutController;
     engine.rootContext()->setContextProperty("shortcutController", &shortcutController);
+
+    FileRevealer fileRevealer;
+    engine.rootContext()->setContextProperty("fileRevealer", &fileRevealer);
 
     // 3. 图标 Provider 注册
     engine.addImageProvider("appicon", new AppIconProvider());

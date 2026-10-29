@@ -3,6 +3,9 @@
 
 #include <QAbstractListModel>
 #include <QList>
+#include <QString>
+
+#include "ConfigPaths.h"
 
 struct ModuleItem
 {
@@ -32,6 +35,8 @@ public:
     QHash<int, QByteArray> roleNames() const override;
 
     // 数据加载与持久化
+    // 确保配置文件目录（exe 上一级目录下的 config 文件夹）已存在
+    Q_INVOKABLE bool ensureConfigDir();
     Q_INVOKABLE void loadDataFromSource();
     Q_INVOKABLE void addModule(const QString &name, const QString &path, const QString &color, const QString &character);
 
@@ -43,6 +48,8 @@ public:
 
 private:
     QList<ModuleItem> m_items;
+    // 配置文件统一存放于 exe 上一级目录的 config 文件夹中
+    QString configFilePath() const;
     bool saveToFile(); // 统一写入 config.json
 };
 

@@ -10,11 +10,11 @@
 - Add, edit, remove, browse, and launch local application entries (`.exe` and `.lnk`).
 - Scan the Windows Applications and Desktop locations for candidate `.exe` and `.lnk` files.
 - Display native Windows application icons, including shortcut icons, with a generated letter/color fallback.
-- Store module definitions in `config.json` and write updates atomically with `QSaveFile`.
+- Store module definitions in `config/config.json` and write updates atomically with `QSaveFile`.
 - Connect to an MQTT broker, save broker settings through `QSettings`, and reconnect automatically when a saved host exists.
-- Subscribe to `home/desktop/nfc_command` at QoS 1.
+- Subscribe to `home/esp32` at QoS 1.
 - Parse a JSON payload's `value` property, show the received command in the UI, and use it to match a configured module's `character` value.
-- Export `config.json` plus PNG application/fallback icons to `share_bundle.zip`.
+- Export `config/config.json` plus PNG application/fallback icons to `config/share_bundle.zip`.
 
 ## Platform and requirements
 
@@ -39,7 +39,7 @@ cmake -S . -B build -G Ninja -DCMAKE_PREFIX_PATH=<Qt-prefix>
 cmake --build build
 ```
 
-The executable is normally generated beneath the build directory. For a distributable Windows folder, use the `windeployqt` tool that belongs to the same Qt kit, then place `config.json` beside the executable.
+The executable is normally generated beneath the build directory. For a distributable Windows folder, use the `windeployqt` tool that belongs to the same Qt kit. `config.json` no longer sits beside the executable: it lives in a `config` folder one level above the executable (created automatically on first launch).
 
 ```powershell
 <Qt-prefix>/bin/windeployqt.exe --release --qmldir qml --dir dist <path-to>/appRun_To.exe
@@ -57,11 +57,11 @@ cmake --install build --config Release --prefix dist
 2. Enter the MQTT broker host, username, and password, then choose **Save and connect**. The UI currently connects on port **1883**.
 3. Add application modules from **Add more** (scan candidates or enter details manually), or use **Remote Smart** to create pathless command modules.
 4. For a launchable module, set a unique `character` and the absolute path to an `.exe` or `.lnk` file.
-5. Keep `config.json` in the application's working/executable directory. MQTT command lookup uses the executable directory; keeping the file beside the executable avoids path ambiguity.
+5. Configuration files live in the **`config` folder one level above the executable** (with `C:/App/bin/Run_To.exe`, that is `C:/App/config/config.json`). MQTT command lookup, shortcut settings, and export all use that folder; the application creates it on first launch, so nothing has to be placed by hand.
 
-### `config.json` format
+### `config/config.json` format
 
-`config.json` is created and updated by the application. A minimal example is:
+`config/config.json` is created and updated by the application. A minimal example is:
 
 ```json
 {
@@ -84,7 +84,7 @@ cmake --install build --config Release --prefix dist
 After connecting, the client subscribes to the fixed topic:
 
 ```text
-home/desktop/nfc_command
+home/esp32
 ```
 
 Publish a JSON object with a `value` field. Its value is matched exactly against a module's `character` property:
@@ -104,22 +104,22 @@ This fixed topic and payload shape are compatible with an automation that conver
 - Click an application card to view or edit its name, path, fallback icon character, and color; it can also be launched immediately.
 - **Add more** opens a scanner for application shortcuts/executables and a form for manual entries.
 - **Remote Smart** adds command-oriented modules without a local path. Add a path later if the command should launch a local program.
-- **Export configuration** writes `share_bundle.zip` into the application directory by default. It contains the current `config.json` and `resources/<character>.png` images.
+- **Export configuration** writes `share_bundle.zip` into the `config` folder by default. It contains the current `config/config.json` and `resources/<character>.png` images.
 - Use the tray icon to restore the window. Closing the window leaves the process running in the tray.
 
 ## Security notes
 
 - MQTT host, username, and password are saved through `QSettings`, which is not a secure credential vault. Use a trusted Windows account and secure the broker.
 - The MQTT connection uses the configured host and port with no TLS settings exposed by the UI. Use an isolated trusted network, or extend the client to configure encrypted MQTT.
-- Any publisher authorized to write to `home/desktop/nfc_command` can request a configured local application launch. Restrict broker ACLs and do not use untrusted command sources.
-- Treat exported configuration bundles as sensitive: they may expose local application paths and module identifiers.
+- Any publisher authorized to write to `home/esp32` can request a configured local application launch. Restrict broker ACLs and do not use untrusted command sources.
+- The `config` folder (`config.json`, `key.json`, `share_bundle.zip`) may expose local application paths and module identifiers; treat its files as sensitive.
 
 ## Project layout
 
 ```text
 src/
   main.cpp                         Application setup and QML context objects
-  models/ModuleModel.*             config.json-backed module list model
+  models/ModuleModel.*             config/config.json-backed module list model
   controllers/
     MqttHandler.*                  MQTT connection and fixed-topic subscription
     JsonCommandDispatcher.*        JSON `value` parsing and command dispatch

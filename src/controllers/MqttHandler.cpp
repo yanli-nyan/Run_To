@@ -152,7 +152,7 @@ void MqttHandler::handleConnected()
     emit connectionSuccess();
 
     // 自动订阅目标主题
-    subscribeToTopic("home/desktop/nfc_command");
+    subscribeToTopic("home/esp32");
 }
 
 void MqttHandler::handleDisconnected()
