@@ -30,8 +30,8 @@ Rectangle {
         Rectangle {
             id: iconContainer
             Layout.alignment: Qt.AlignHCenter
-            width: 48
-            height: 48
+            implicitWidth: 48
+            implicitHeight: 48
             radius: 24
             color: (cardImg.status === Image.Ready) ? "transparent" : cardRoot.iconColor
 

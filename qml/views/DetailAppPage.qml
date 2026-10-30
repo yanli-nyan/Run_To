@@ -63,7 +63,7 @@ Page {
                 horizontalAlignment: Qt.AlignHCenter
             }
 
-            Item { width: 48 } // 视觉平衡占位
+            Item { implicitWidth: 48 } // 视觉平衡占位
         }
     }
 
@@ -77,12 +77,12 @@ Page {
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: 20
 
-            Item { height: 8 } // 顶部间距
+            Item { implicitHeight: 8 } // 顶部间距
 
             // 顶部实时徽标预览卡片
             Rectangle {
                 Layout.fillWidth: true
-                height: 108
+                implicitHeight: 108
                 radius: 12
                 color: "#FFFFFF"
                 border.color: "#E5E7EB"
@@ -95,8 +95,8 @@ Page {
                     // 图标预览容器
                     Rectangle {
                         id: iconContainer
-                        width: 64
-                        height: 64
+                        implicitWidth: 64
+                        implicitHeight: 64
                         radius: 14
                         color: "#F9FAFB"
                         border.color: Qt.rgba(0, 0, 0, 0.08)
@@ -297,8 +297,8 @@ Page {
 
                             // 颜色色块预览
                             Rectangle {
-                                width: 38
-                                height: 38
+                                implicitWidth: 38
+                                implicitHeight: 38
                                 radius: 6
                                 color: detailPage.getValidColor(colorInput.text, "#CCCCCC")
                                 border.color: "#D1D5DB"
@@ -368,7 +368,7 @@ Page {
                 }
             }
 
-            Item { height: 16 } // 底部留白
+            Item { implicitHeight: 16 } // 底部留白
         }
     }
 }

@@ -65,6 +65,26 @@ target_include_directories(Run_To
         ${CMAKE_CURRENT_SOURCE_DIR}/src/models
 )
 
+# 源文件统一是「无 BOM 的 UTF-8」，且大量注释为中文。
+# 不加这个标志时 MSVC 按系统代码页（中文机器为 936）解读源文件，
+# 每个含中文的 .cpp/.h 都会抛一次 C4819，编译日志被刷满。
+# /utf-8 等价于 /source-charset:utf-8 + /execution-charset:utf-8，
+# 让源码按 UTF-8 读取、字符串字面量也按 UTF-8 落地，与 Qt 语义一致。
+if(MSVC)
+    target_compile_options(Run_To PRIVATE /utf-8)
+endif()
+
+# Release 构建下掐掉 qDebug()：项目里有 80+ 处 qDebug/qInfo 调用，
+# 每条 MQTT 报文都会拼字符串。QT_NO_DEBUG_OUTPUT 让 qDebug 直接变成空操作，
+# 不进入 Qt 日志系统，也就不会为日志格式化分配内存。
+# qWarning/qCritical 保留，故障排查场景仍需要。
+target_compile_definitions(Run_To
+    PRIVATE
+        $<$<CONFIG:Release>:QT_NO_DEBUG_OUTPUT>
+        $<$<CONFIG:MinSizeRel>:QT_NO_DEBUG_OUTPUT>
+        $<$<CONFIG:RelWithDebInfo>:QT_NO_DEBUG_OUTPUT>
+)
+
 set_target_properties(Run_To PROPERTIES
     MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
     MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}

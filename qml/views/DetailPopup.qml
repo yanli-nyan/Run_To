@@ -83,8 +83,8 @@ Popup {
             }
 
             Rectangle {
-                width: 26
-                height: 26
+                implicitWidth: 26
+                implicitHeight: 26
                 radius: 13
                 color: closeMouse.containsMouse ? "#F3F4F6" : "transparent"
 
@@ -108,7 +108,7 @@ Popup {
         // 分割线
         Rectangle {
             Layout.fillWidth: true
-            height: 1
+            implicitHeight: 1
             color: "#F3F4F6"
         }
 
@@ -300,8 +300,8 @@ Popup {
 
                     // 色块指示
                     Rectangle {
-                        width: 36
-                        height: 36
+                        implicitWidth: 36
+                        implicitHeight: 36
                         radius: 6
                         color: popup.getValidColor(editColorField.text.trim(), popup.iconColor)
                         border.color: "#D1D5DB"

@@ -67,7 +67,7 @@ Window {
         // 分割线
         Rectangle {
             Layout.fillWidth: true
-            height: 1
+            implicitHeight: 1
             color: "#F3F4F6"
         }
 
@@ -88,8 +88,8 @@ Window {
 
                 // 模块徽标预览
                 Rectangle {
-                    width: 44
-                    height: 44
+                    implicitWidth: 44
+                    implicitHeight: 44
                     radius: 22
                     color: root.getValidColor(colorInput.text, "#3B82F6")
                     border.color: Qt.rgba(0, 0, 0, 0.06)

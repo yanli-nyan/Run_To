@@ -52,7 +52,7 @@ Window {
         // ======================= 顶部导航栏 =======================
         Rectangle {
             Layout.fillWidth: true
-            height: 52
+            implicitHeight: 52
             color: "#FFFFFF"
 
             Rectangle {
@@ -136,7 +136,7 @@ Window {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 1
+                        implicitHeight: 1
                         color: "#F3F4F6"
                     }
 
@@ -250,8 +250,8 @@ Window {
                         spacing: 8
 
                         Rectangle {
-                            width: 3
-                            height: 14
+                            implicitWidth: 3
+                            implicitHeight: 14
                             radius: 1.5
                             color: "#3B82F6"
                         }
@@ -275,7 +275,7 @@ Window {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 1
+                        implicitHeight: 1
                         color: "#F3F4F6"
                     }
 
@@ -488,7 +488,7 @@ Window {
                                 }
                             }
 
-                            Item { height: 4 }
+                            Item { implicitHeight: 4 }
                         }
                     }
 

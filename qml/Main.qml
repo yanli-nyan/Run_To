@@ -23,6 +23,24 @@ ApplicationWindow {
     // 1. 增加一个标识，判断是否是彻底退出
     property bool isReallyQuit: false
 
+    // Loader.item 的静态类型是 QObject，直接调用 show()/visible 会让 qmllint
+    // 报 missing-property。这里统一做一次 Window 转换与判空。
+    function activateWindow(loader) {
+        const win = loader ? loader.item as Window : null
+        if (win) {
+            win.show()
+            win.raise()
+            win.requestActivate()
+        }
+    }
+
+    // 窗口关闭后回收对应 Loader，释放整棵 QML 树
+    function reclaimIfHidden(loader) {
+        const win = loader ? loader.item as Window : null
+        if (win && !win.visible)
+            loader.active = false
+    }
+
     // 2. 修改 onClosing 逻辑
     onClosing: function(close) {
         if (root.isReallyQuit) {
@@ -110,8 +128,10 @@ ApplicationWindow {
                 }
 
                 Rectangle {
-                    width: 7
-                    height: 7
+                    // 该 Rectangle 由 RowLayout 管理，用 width/height 属于未定义行为，
+                    // 必须改成 implicitWidth/implicitHeight
+                    implicitWidth: 7
+                    implicitHeight: 7
                     radius: 3.5
                     color: root.mqttConnected ? "#10B981" : "#9CA3AF"
                     Layout.alignment: Qt.AlignVCenter
@@ -180,7 +200,13 @@ ApplicationWindow {
                     color: settingBtn.down ? "#E5E7EB" : (settingBtn.hovered ? "#F9FAFB" : "#FFFFFF")
                 }
 
-                onClicked: settingWin.show()
+                onClicked: {
+                    if (!settingWinLoader.active) {
+                        settingWinLoader.active = true
+                    } else {
+                        root.activateWindow(settingWinLoader)
+                    }
+                }
             }
         }
     }
@@ -205,8 +231,23 @@ ApplicationWindow {
             rightPadding: 20
             spacing: 16
 
-            ShortcutConfigDialog {
-                id: shortcutConfigDialog
+            // 三个对话框原先在启动时就实例化、只是 visible:false 挂着，
+            // 每棵树都带完整的 GridLayout/ListView/TextField 控件链。
+            // 改成 Loader：首次点击才建，关闭时卸载并释放。
+            Loader {
+                id: shortcutConfigLoader
+                active: false
+                source: "ShortcutConfigDialog.qml"
+
+                onLoaded: root.activateWindow(shortcutConfigLoader)
+
+                // 窗口关闭（用户点 × 或调用 close()）后回收整棵树
+                Connections {
+                    target: shortcutConfigLoader.item
+                    function onVisibleChanged() {
+                        root.reclaimIfHidden(shortcutConfigLoader)
+                    }
+                }
             }
 
             // 内置功能卡片
@@ -215,18 +256,27 @@ ApplicationWindow {
                 iconColor: "#8B5CF6"
                 onClicked: {
                     console.log("点击了快捷键卡片")
-                    // 如果窗口已打开但被最小化或置于底层，自动激活并置顶到前台
-                    if (!shortcutConfigDialog.visible) {
-                        shortcutConfigDialog.show()
+                    if (!shortcutConfigLoader.active) {
+                        shortcutConfigLoader.active = true
                     } else {
-                        shortcutConfigDialog.raise()
-                        shortcutConfigDialog.requestActivate()
+                        root.activateWindow(shortcutConfigLoader)
                     }
                 }
             }
 
-            ModuleManagerDialog {
-                id: managerDialog
+            Loader {
+                id: managerDialogLoader
+                active: false
+                source: "ModuleManagerDialog.qml"
+
+                onLoaded: root.activateWindow(managerDialogLoader)
+
+                Connections {
+                    target: managerDialogLoader.item
+                    function onVisibleChanged() {
+                        root.reclaimIfHidden(managerDialogLoader)
+                    }
+                }
             }
 
             ActionCard {
@@ -234,11 +284,10 @@ ApplicationWindow {
                 iconColor: "#3B82F6"
                 onClicked: {
                     console.log("点击了远程智能卡片")
-                    if (!managerDialog.visible) {
-                        managerDialog.show()
+                    if (!managerDialogLoader.active) {
+                        managerDialogLoader.active = true
                     } else {
-                        managerDialog.raise()
-                        managerDialog.requestActivate()
+                        root.activateWindow(managerDialogLoader)
                     }
                 }
             }
@@ -279,12 +328,7 @@ ApplicationWindow {
                     if (!selectAppLoader.active) {
                         selectAppLoader.active = true
                     } else {
-                        const win = selectAppLoader.item as Window
-                        if (win) {
-                            win.show()
-                            win.raise()
-                            win.requestActivate()
-                        }
+                        root.activateWindow(selectAppLoader)
                     }
                 }
             }
@@ -334,16 +378,32 @@ ApplicationWindow {
         source: "views/SelectAppPage.qml"
 
         // 首次激活加载完成后立即展示窗口
-        onLoaded: {
-            const win = item as Window
-            if (win) {
-                win.show()
+        onLoaded: root.activateWindow(selectAppLoader)
+
+        // 关窗即回收：这棵树里带着 StackView + ListView + 每个条目的 delegate，
+        // 打开一次就永久驻留是当前最大的内存泄漏点之一。
+        Connections {
+            target: selectAppLoader.item
+            function onVisibleChanged() {
+                root.reclaimIfHidden(selectAppLoader)
             }
         }
     }
 
-    SettingWindow {
-        id: settingWin
+    // 设置窗口同样按需创建：它只有点"设置"按钮时才会用到
+    Loader {
+        id: settingWinLoader
+        active: false
+        source: "views/SettingWindow.qml"
+
+        onLoaded: root.activateWindow(settingWinLoader)
+
+        Connections {
+            target: settingWinLoader.item
+            function onVisibleChanged() {
+                root.reclaimIfHidden(settingWinLoader)
+            }
+        }
     }
 
     // 监听配置包导出反馈

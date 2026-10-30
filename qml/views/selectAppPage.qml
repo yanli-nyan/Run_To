@@ -133,8 +133,8 @@ Window {
                         spacing: 12
 
                         Rectangle {
-                            width: 36
-                            height: 36
+                            implicitWidth: 36
+                            implicitHeight: 36
                             radius: 8
                             color: "#EFF6FF"
 
@@ -193,7 +193,7 @@ Window {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 1
+                        implicitHeight: 1
                         color: "#E5E7EB"
                     }
                 }
@@ -268,8 +268,8 @@ Window {
                                 spacing: 12
 
                                 Rectangle {
-                                    width: 36
-                                    height: 36
+                                    implicitWidth: 36
+                                    implicitHeight: 36
                                     radius: 8
                                     color: "#F3F4F6"
                                     border.color: "#E5E7EB"

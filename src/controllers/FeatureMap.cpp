@@ -146,6 +146,10 @@ bool FeatureMap::execute(const QString &command, const QVariantMap &params,
 bool FeatureMap::runScript(const QVariantMap &feature, const QVariantMap &params,
                            QVariantMap &outParams, QString &detail)
 {
+    // 脚本执行不产生额外输出参数：合并后的 params 已由 execute() 写入 outParams，
+    // 这里只是保持签名一致，显式声明为该参数在本函数内不使用。
+    Q_UNUSED(outParams);
+
     const QString target = feature.value("target").toString();
     const QString path = resolveScriptPath(target);
 

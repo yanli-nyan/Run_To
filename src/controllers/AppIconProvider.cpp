@@ -4,6 +4,7 @@
 #include <QIcon>
 #include <QUrl>
 #include <QDir>
+#include <QMutexLocker>
 #include <QDebug>
 
 #ifdef Q_OS_WIN
@@ -61,6 +62,7 @@ static QImage hIconToQImage(HICON hIcon, const QSize &size)
 AppIconProvider::AppIconProvider()
     : QQuickImageProvider(QQuickImageProvider::Image)
 {
+    m_cache.setMaxCost(kMaxCacheBytes);
 }
 
 QImage AppIconProvider::requestImage(const QString &id, QSize *size, const QSize &requestedSize)
@@ -81,6 +83,23 @@ QImage AppIconProvider::requestImage(const QString &id, QSize *size, const QSize
     QSize actualSize = requestedSize.isValid() ? requestedSize : QSize(48, 48);
     if (size)
         *size = actualSize;
+
+    // 缓存键包含尺寸：同一个 .lnk 在卡片上按 64x64、列表里按 28x28 请求，
+    // 不区分尺寸会把小图当大图返回，模糊且白占内存。
+    const QString cacheKey = cleanPath
+                             + QLatin1Char('@')
+                             + QString::number(actualSize.width())
+                             + QLatin1Char('x')
+                             + QString::number(actualSize.height());
+
+    {
+        QMutexLocker locker(&m_cacheMutex);
+        if (const QImage *hit = m_cache.object(cacheKey))
+        {
+            // QCache 的内部计数已把它标记为最近使用，直接返回副本即可
+            return *hit;
+        }
+    }
 
 #ifdef Q_OS_WIN
     if (fileInfo.suffix().compare("lnk", Qt::CaseInsensitive) == 0)
@@ -138,7 +157,13 @@ QImage AppIconProvider::requestImage(const QString &id, QSize *size, const QSize
                             pShellLink->Release();
                             if (SUCCEEDED(hrCom))
                                 CoUninitialize();
-                            return hIconToQImage(hCustomIcon, actualSize);
+                            const QImage icon = hIconToQImage(hCustomIcon, actualSize);
+                            if (!icon.isNull())
+                            {
+                                QMutexLocker locker(&m_cacheMutex);
+                                m_cache.insert(cacheKey, new QImage(icon), icon.sizeInBytes());
+                            }
+                            return icon;
                         }
                     }
                 }
@@ -155,7 +180,13 @@ QImage AppIconProvider::requestImage(const QString &id, QSize *size, const QSize
             {
                 if (SUCCEEDED(hrCom))
                     CoUninitialize();
-                return hIconToQImage(sfi.hIcon, actualSize);
+                const QImage icon = hIconToQImage(sfi.hIcon, actualSize);
+                if (!icon.isNull())
+                {
+                    QMutexLocker locker(&m_cacheMutex);
+                    m_cache.insert(cacheKey, new QImage(icon), icon.sizeInBytes());
+                }
+                return icon;
             }
         }
 
@@ -169,7 +200,13 @@ QImage AppIconProvider::requestImage(const QString &id, QSize *size, const QSize
     QIcon fallbackIcon = iconProvider.icon(fileInfo);
     if (!fallbackIcon.isNull())
     {
-        return fallbackIcon.pixmap(actualSize).toImage();
+        const QImage icon = fallbackIcon.pixmap(actualSize).toImage();
+        if (!icon.isNull())
+        {
+            QMutexLocker locker(&m_cacheMutex);
+            m_cache.insert(cacheKey, new QImage(icon), icon.sizeInBytes());
+        }
+        return icon;
     }
 
     return QImage();

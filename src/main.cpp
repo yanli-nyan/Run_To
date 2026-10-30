@@ -1,6 +1,7 @@
 #include <QApplication>
 #include <QQmlApplicationEngine>
 #include <QQuickStyle>
+#include <QQuickWindow>
 #include <QQmlContext>
 #include <QDir>
 #include <cstdio>
@@ -96,6 +97,23 @@ int main(int argc, char *argv[])
         Qt::QueuedConnection);
 
     engine.loadFromModule("Run_To", "Main");
+
+    // 本程序 99% 的时间都藏在托盘里。默认情况下 Qt 会一直保留 D3D11 设备、
+    // 纹理与交换链，窗口隐藏后私有内存几乎不回落（实测 visible 153.4MB /
+    // tray 152.7MB，等于没有释放）。下面两行让窗口隐藏时主动释放场景图与
+    // 图形后端，代价仅是下次唤回时重建一次（几十毫秒，交互上无感）。
+    //
+    // 注意：这两个是 QQuickWindow 的实例方法而非静态方法，
+    // 必须在根窗口创建之后调用。子窗口（设置/扫描等）由 QML 创建，
+    // 这里通过窗口的 persistentGraphics 属性统一下发。
+    for (QObject *rootObject : engine.rootObjects())
+    {
+        if (auto *window = qobject_cast<QQuickWindow *>(rootObject))
+        {
+            window->setPersistentGraphics(false);
+            window->setPersistentSceneGraph(false);
+        }
+    }
 
     // 5. 触发 MQTT 自连（此时 QML Connections 已完成绑定，可正常接收信号）
     mqttHandler.tryAutoConnect();

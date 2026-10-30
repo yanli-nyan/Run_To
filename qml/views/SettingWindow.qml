@@ -57,7 +57,7 @@ Window {
             anchors.horizontalCenter: parent.horizontalCenter
             spacing: 16
 
-            Item { height: 4 } // 顶部留白
+            Item { implicitHeight: 4 } // 顶部留白
 
             // --- 卡片 1：通用偏好设置 ---
             Rectangle {
@@ -83,7 +83,7 @@ Window {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 1
+                        implicitHeight: 1
                         color: "#F3F4F6"
                     }
 
@@ -197,8 +197,8 @@ Window {
                                 spacing: 5
 
                                 Rectangle {
-                                    width: 6
-                                    height: 6
+                                    implicitWidth: 6
+                                    implicitHeight: 6
                                     radius: 3
                                     color: root.connStatus === 2 ? "#10B981" :
                                                                    (root.connStatus === 1 ? "#F59E0B" :
@@ -220,7 +220,7 @@ Window {
 
                     Rectangle {
                         Layout.fillWidth: true
-                        height: 1
+                        implicitHeight: 1
                         color: "#F3F4F6"
                     }
 
@@ -335,7 +335,7 @@ Window {
                 }
             }
 
-            Item { height: 2 } // 弹性间距
+            Item { implicitHeight: 2 } // 弹性间距
 
             // --- 底部操作栏 ---
             RowLayout {
@@ -412,7 +412,7 @@ Window {
                 }
             }
 
-            Item { height: 8 } // 底部留白
+            Item { implicitHeight: 8 } // 底部留白
         }
     }
 
