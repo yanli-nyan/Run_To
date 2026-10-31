@@ -14,6 +14,7 @@
 #include "ShareManager.h"
 #include "FileRevealer.h"
 #include "ShortcutController.h"
+#include "AutoStartManager.h"
 
 static void messageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg)
 {
@@ -84,6 +85,16 @@ int main(int argc, char *argv[])
     FileRevealer fileRevealer;
     engine.rootContext()->setContextProperty("fileRevealer", &fileRevealer);
 
+    // 开机自启动：注册表 HKCU\...\Run 下的 "Run_To" 值
+    AutoStartManager autoStartManager;
+    engine.rootContext()->setContextProperty("autoStartManager", &autoStartManager);
+    // 启动时校正自启动登记（首次运行默认开启；exe 路径变化时自动改写）
+    autoStartManager.reconcileOnStartup();
+
+    // 被开机自启动拉起时（命令行带 --startup）只驻留托盘，不弹主界面
+    const bool launchedAtStartup =
+        app.arguments().contains(QStringLiteral("--startup"));
+
     // 3. 图标 Provider 注册
     engine.addImageProvider("appicon", new AppIconProvider());
 
@@ -112,6 +123,11 @@ int main(int argc, char *argv[])
         {
             window->setPersistentGraphics(false);
             window->setPersistentSceneGraph(false);
+
+            if (launchedAtStartup)
+            {
+                window->hide();
+            }
         }
     }
 

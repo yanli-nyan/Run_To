@@ -31,11 +31,9 @@ Window {
             mqttPwdInput.text = mqttHandler.password || ""
         }
 
-        // 读取开机自启状态（优先从 settingManager 或 mqttHandler 读取）
-        if (typeof settingManager !== "undefined" && typeof settingManager.autoStart !== "undefined") {
-            root.autoStart = settingManager.autoStart
-        } else if (typeof mqttHandler !== "undefined" && typeof mqttHandler.autoStart !== "undefined") {
-            root.autoStart = mqttHandler.autoStart
+        // 读取开机自启状态：唯一事实来源是注册表，由 autoStartManager 暴露 enabled
+        if (typeof autoStartManager !== "undefined" && autoStartManager !== null) {
+            root.autoStart = autoStartManager.enabled
         }
     }
 
@@ -135,14 +133,17 @@ Window {
                             }
 
                             onToggled: {
-                                root.autoStart = checked
-                                // 调用 C++ 写入注册表或开机启动目录
-                                if (typeof settingManager !== "undefined" && settingManager.setAutoStart) {
-                                    settingManager.setAutoStart(checked)
-                                } else if (typeof mqttHandler !== "undefined" && mqttHandler.setAutoStart) {
-                                    mqttHandler.setAutoStart(checked)
+                                // 写入 HKCU\...\Run 注册表项，失败时回退开关状态
+                                if (typeof autoStartManager !== "undefined" && autoStartManager !== null) {
+                                    if (!autoStartManager.setEnabled(checked)) {
+                                        autoStartSwitch.checked = root.autoStart
+                                        console.log("[设置] 自启动写入注册表失败")
+                                        return
+                                    }
+                                    root.autoStart = autoStartManager.enabled
                                 } else {
-                                    console.log("[设置] 自启动状态更改为:", checked)
+                                    root.autoStart = checked
+                                    console.log("[设置] 未找到 autoStartManager 后端实例")
                                 }
                             }
                         }
@@ -413,6 +414,13 @@ Window {
             }
 
             Item { implicitHeight: 8 } // 底部留白
+        }
+    }
+
+    Connections {
+        target: typeof autoStartManager !== "undefined" ? autoStartManager : null
+        function onEnabledChanged() {
+            root.autoStart = autoStartManager.enabled
         }
     }
 
